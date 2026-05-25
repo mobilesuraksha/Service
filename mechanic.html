@@ -1,143 +1,412 @@
 <!DOCTYPE html>
 <html lang="hi">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mistri Dashboard - 24x7 Vahan Sahayata</title>
-    <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="style.css">
-    <style>
-        .dashboard {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            padding: 20px;
-        }
-        .dashboard-item {
-            background: white;
-            padding: 20px;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .online-toggle {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        .toggle-switch {
-            width: 60px;
-            height: 34px;
-            background: #ccc;
-            border-radius: 17px;
-            position: relative;
-            cursor: pointer;
-            transition: background 0.3s;
-        }
-        .toggle-switch.active {
-            background: #16A34A;
-        }
-        .toggle-circle {
-            width: 30px;
-            height: 30px;
-            background: white;
-            border-radius: 50%;
-            position: absolute;
-            top: 2px;
-            left: 2px;
-            transition: left 0.3s;
-        }
-        .toggle-switch.active .toggle-circle {
-            left: 28px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="theme-color" content="#1565C0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mistri Panel">
+  <title>Mechanic Panel — 24x7 Vahan Sahayata</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-storage-compat.js"></script>
+  <style>
+    /* ── Mechanic-specific styles ── */
+    .earning-card {
+      background: linear-gradient(135deg, #1565C0, #1E88E5);
+      border-radius: var(--radius-lg);
+      padding: 24px; margin-bottom: 16px;
+      color: #fff; position: relative; overflow: hidden;
+    }
+    .earning-card::after {
+      content: '💰';
+      position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
+      font-size: 56px; opacity: 0.15;
+    }
+    .earning-card .ec-label { font-size: 13px; opacity: 0.8; margin-bottom: 4px; }
+    .earning-card .ec-amount { font-family: var(--font-head); font-size: 38px; font-weight: 900; }
+    .earning-card .ec-sub    { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+
+    .req-new-badge {
+      display: inline-block;
+      background: var(--emergency); color: #fff;
+      font-size: 10px; font-weight: 800;
+      padding: 2px 8px; border-radius: 30px;
+      letter-spacing: 0.5px; margin-left: 8px;
+      animation: pulse-btn 1.5s infinite;
+    }
+
+    .mech-reg-steps {
+      display: flex; gap: 8px; margin-bottom: 24px; overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .step-dot {
+      flex-shrink: 0; width: 32px; height: 32px; border-radius: 50%;
+      border: 2px solid var(--border); background: var(--surface3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px; font-weight: 700; color: var(--text-muted);
+      transition: all 0.3s;
+    }
+    .step-dot.active  { border-color: var(--primary-lt); background: #1E88E520; color: var(--primary-lt); }
+    .step-dot.done    { border-color: var(--success-lt); background: var(--success); color: #fff; }
+    .step-line { flex: 1; height: 2px; background: var(--border); align-self: center; flex-shrink: 0; min-width: 20px; }
+
+    .spec-grid {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 16px;
+    }
+    .spec-item {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--surface3); border: 1.5px solid var(--border);
+      border-radius: 10px; padding: 10px 12px; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .spec-item input[type=checkbox] { accent-color: var(--primary-lt); }
+    .spec-item label { font-size: 13px; font-weight: 600; cursor: pointer; }
+    .spec-item.selected { background: #1E88E515; border-color: var(--primary-lt); }
+
+    .completed-job-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .job-icon { font-size: 28px; }
+    .job-info { flex: 1; }
+    .job-info h4 { font-size: 14px; font-weight: 700; }
+    .job-info p  { font-size: 12px; color: var(--text-muted); }
+    .job-earning { font-family: var(--font-head); font-size: 16px; font-weight: 800; color: var(--success-lt); }
+  </style>
 </head>
 <body>
-    <!-- Toast -->
-    <div id="toast" class="toast"></div>
 
-    <!-- Loading Spinner -->
-    <div id="loadingSpinner" class="loading-spinner">
-        <div class="spinner"></div>
-        <p>Loading...</p>
+<div id="loadingOverlay"><div class="spinner"></div></div>
+
+<!-- ══════════════════════════════════════════════════════════════
+     GATE 1: Show auth form if not logged in
+══════════════════════════════════════════════════════════════ -->
+<div id="mechAuthGate">
+
+  <header id="appHeader">
+    <div class="brand">
+      <div class="brand-icon">🔧</div>
+      <div>
+        <div class="brand-name">Mistri Panel</div>
+        <div class="brand-tag">24x7 Vahan Sahayata</div>
+      </div>
+    </div>
+    <a href="index.html" class="icon-btn" title="User App">🏠</a>
+  </header>
+
+  <div style="padding:20px">
+    <div class="tabs">
+      <button class="tab active" id="mTabLogin" onclick="switchMechTab('login')">Login</button>
+      <button class="tab"        id="mTabReg"   onclick="switchMechTab('register')">Register</button>
     </div>
 
-    <!-- Header -->
-    <header class="header-top">
-        <div class="header-left">
-            <div class="logo-badge">
-                <span class="logo-emoji">🔧</span>
-            </div>
-            <div>
-                <h1 class="app-title" id="mechnicName">Mistri Dashboard</h1>
-                <p class="app-tagline" id="onlineStatus">🔴 Offline</p>
-            </div>
-        </div>
-        <button id="logoutMechBtn" class="icon-btn" title="Logout">
-            <span class="icon">🚪</span>
+    <!-- ── Mechanic Login ── -->
+    <div id="mechLoginForm" class="auth-card slide-up">
+      <h2>👋 Mistri Login</h2>
+      <p class="auth-sub">Apne mechanic account mein login karein</p>
+      <button class="btn btn-google btn-full" onclick="mechGoogleLogin()">
+        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G"> Google se Login
+      </button>
+      <div class="divider">ya email se</div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" id="mLoginEmail" class="form-control" placeholder="aapka@email.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input type="password" id="mLoginPass" class="form-control" placeholder="••••••••">
+      </div>
+      <button class="btn btn-primary btn-full" onclick="mechEmailLogin()">Login Karein</button>
+      <p style="text-align:center;margin-top:14px;font-size:13px;color:var(--text-muted)">
+        Account nahi? <span onclick="switchMechTab('register')" style="color:var(--primary-lt);cursor:pointer;font-weight:700">Register Karein</span>
+      </p>
+    </div>
+
+    <!-- ── Mechanic Registration — Multi-step ── -->
+    <div id="mechRegForm" style="display:none">
+
+      <!-- Step indicator -->
+      <div class="mech-reg-steps" id="stepIndicator">
+        <div class="step-dot active" id="step1dot">1</div>
+        <div class="step-line"></div>
+        <div class="step-dot" id="step2dot">2</div>
+        <div class="step-line"></div>
+        <div class="step-dot" id="step3dot">3</div>
+      </div>
+
+      <!-- Step 1: Basic Info -->
+      <div id="regStep1" class="auth-card slide-up">
+        <h2>🆕 Mistri Registration</h2>
+        <p class="auth-sub">Step 1 of 3 — Basic Jankari</p>
+        <button class="btn btn-google btn-full" onclick="mechGoogleLogin()">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G"> Google se Register
         </button>
-    </header>
+        <div class="divider">ya email se</div>
+        <div class="form-group">
+          <label class="form-label">Pura Naam *</label>
+          <input type="text" id="mRegName" class="form-control" placeholder="Ramesh Kumar">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mobile Number *</label>
+          <input type="tel" id="mRegPhone" class="form-control" placeholder="9876543210">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email *</label>
+          <input type="email" id="mRegEmail" class="form-control" placeholder="aapka@email.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password *</label>
+          <input type="password" id="mRegPass" class="form-control" placeholder="Min 6 characters">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="goToStep(2)">Aage Badhen →</button>
+      </div>
 
-    <!-- Main Dashboard -->
-    <div class="dashboard">
-        <!-- Online Status Toggle -->
-        <div class="dashboard-item" style="grid-column: 1/-1;">
-            <h3>Your Status</h3>
-            <div class="online-toggle">
-                <div class="toggle-switch" id="onlineToggle">
-                    <div class="toggle-circle"></div>
-                </div>
-                <span id="statusText">Click to go Online</span>
+      <!-- Step 2: Professional Info -->
+      <div id="regStep2" style="display:none" class="auth-card slide-up">
+        <h2>🔧 Professional Info</h2>
+        <p class="auth-sub">Step 2 of 3 — Experience & Specialization</p>
+
+        <div class="form-group">
+          <label class="form-label">Anubhav (Experience) *</label>
+          <select id="mRegExp" class="form-control">
+            <option value="">Select experience</option>
+            <option value="0-1">0-1 saal (Fresher)</option>
+            <option value="1-3">1-3 saal</option>
+            <option value="3-5">3-5 saal</option>
+            <option value="5-10">5-10 saal</option>
+            <option value="10+">10+ saal (Expert)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Service Area / Shetra *</label>
+          <input type="text" id="mRegArea" class="form-control" placeholder="Jaise: Agra, Mathura, Firozabad...">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Vehicle Specialization (multiple chunein)</label>
+          <div class="spec-grid" id="specGrid">
+            <div class="spec-item" onclick="toggleSpec(this,'bike')">
+              <input type="checkbox" id="sp-bike"> <label for="sp-bike">🏍️ Bike</label>
             </div>
-            <p id="statusMessage" style="font-size: 14px; color: #666;"></p>
-        </div>
-
-        <!-- Pending Requests -->
-        <div class="dashboard-item">
-            <h3>📋 Pending Requests <span id="pendingCount" style="color: #DC2626; font-weight: bold;">(0)</span></h3>
-            <div id="pendingRequestsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
-                <p style="color: #999; text-align: center; padding: 20px;">No pending requests</p>
+            <div class="spec-item" onclick="toggleSpec(this,'car')">
+              <input type="checkbox" id="sp-car"> <label for="sp-car">🚗 Car</label>
             </div>
-        </div>
-
-        <!-- My Active Jobs -->
-        <div class="dashboard-item">
-            <h3>🔧 Active Jobs <span id="activeJobCount" style="color: #2563EB; font-weight: bold;">(0)</span></h3>
-            <div id="activeJobsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
-                <p style="color: #999; text-align: center; padding: 20px;">No active jobs</p>
+            <div class="spec-item" onclick="toggleSpec(this,'tempo')">
+              <input type="checkbox" id="sp-tempo"> <label for="sp-tempo">🚐 Tempo/Max</label>
             </div>
-        </div>
-
-        <!-- Earnings -->
-        <div class="dashboard-item">
-            <h3>💰 Today's Earnings</h3>
-            <div style="font-size: 32px; font-weight: bold; color: #16A34A; margin: 10px 0;">₹0</div>
-            <small style="color: #666;">Completed jobs: <span id="completedToday">0</span></small>
-        </div>
-
-        <!-- Statistics -->
-        <div class="dashboard-item">
-            <h3>📊 Statistics</h3>
-            <div style="font-size: 24px; font-weight: bold; color: #2563EB; margin: 10px 0;">
-                <div>Total Jobs: <span id="totalJobs">0</span></div>
-                <div style="font-size: 18px; margin-top: 5px;">Rating: <span id="mechRating">0</span>⭐</div>
+            <div class="spec-item" onclick="toggleSpec(this,'loading')">
+              <input type="checkbox" id="sp-loading"> <label for="sp-loading">🚚 Loading</label>
             </div>
+            <div class="spec-item" onclick="toggleSpec(this,'tractor')">
+              <input type="checkbox" id="sp-tractor"> <label for="sp-tractor">🚜 Tractor</label>
+            </div>
+            <div class="spec-item" onclick="toggleSpec(this,'truck')">
+              <input type="checkbox" id="sp-truck"> <label for="sp-truck">🛻 Truck</label>
+            </div>
+          </div>
         </div>
 
-        <!-- Profile -->
-        <div class="dashboard-item">
-            <h3>👤 My Profile</h3>
-            <p><strong>Name:</strong> <span id="mechName">-</span></p>
-            <p><strong>Phone:</strong> <span id="mechPhone">-</span></p>
-            <p><strong>Experience:</strong> <span id="mechExp">0</span> years</p>
-            <p><strong>Area:</strong> <span id="mechArea">-</span></p>
-            <button class="btn btn-small btn-primary" style="margin-top: 10px; width: 100%;" onclick="window.location.href='#edit-profile'">
-                Edit Profile
-            </button>
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-outline" style="flex:1" onclick="goToStep(1)">← Wapas</button>
+          <button class="btn btn-primary" style="flex:1" onclick="goToStep(3)">Aage →</button>
         </div>
+      </div>
+
+      <!-- Step 3: Documents & Submit -->
+      <div id="regStep3" style="display:none" class="auth-card slide-up">
+        <h2>📄 Documents</h2>
+        <p class="auth-sub">Step 3 of 3 — Verification (Optional)</p>
+
+        <div class="form-group">
+          <label class="form-label">Aadhaar Number (Optional)</label>
+          <input type="text" id="mRegAadhaar" class="form-control" placeholder="XXXX XXXX XXXX">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Profile Photo (Optional)</label>
+          <label class="file-upload" for="mechPhoto">
+            <input type="file" id="mechPhoto" accept="image/*" onchange="previewMechPhoto(this)">
+            <div class="fu-icon">📷</div>
+            <div class="fu-text">Apni photo upload karein</div>
+          </label>
+          <img id="mechPhotoPreview" alt="" style="display:none;width:80px;height:80px;border-radius:50%;object-fit:cover;margin-top:10px;border:2px solid var(--border)">
+        </div>
+
+        <div class="urgent-alert">
+          <div class="ua-icon">ℹ️</div>
+          <p>Registration ke baad admin approval milega. Approve hone par aap requests accept kar sakte hain.</p>
+        </div>
+
+        <div style="display:flex;gap:10px">
+          <button class="btn btn-outline" style="flex:1" onclick="goToStep(2)">← Wapas</button>
+          <button class="btn btn-primary" style="flex:1" onclick="completeMechRegistration()">✅ Register Karein</button>
+        </div>
+      </div>
+
+    </div><!-- end mechRegForm -->
+  </div>
+</div><!-- end mechAuthGate -->
+
+<!-- ══════════════════════════════════════════════════════════════
+     GATE 2: Mechanic Dashboard (shown after auth)
+══════════════════════════════════════════════════════════════ -->
+<div id="mechDashboard" style="display:none">
+
+  <header id="mechHeader">
+    <div class="brand">
+      <div class="brand-icon" style="background:linear-gradient(135deg,var(--primary),var(--primary-lt))">🔧</div>
+      <div>
+        <div class="brand-name" id="mechHeaderName">Mechanic</div>
+        <div class="brand-tag">Mistri Panel</div>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div id="mechOnlineDot" style="width:10px;height:10px;border-radius:50%;background:var(--text-dim);margin-right:4px"></div>
+      <button class="btn btn-outline btn-sm" onclick="mechSignOut()">Logout</button>
+    </div>
+  </header>
+
+  <main style="padding-bottom:80px">
+
+    <!-- Approval Pending Banner -->
+    <div id="pendingApprovalBanner" style="display:none;background:#F59E0B15;border:1px solid #F59E0B40;padding:16px 20px;margin:16px;border-radius:var(--radius)">
+      <div style="font-weight:700;color:var(--warning)">⏳ Approval Pending</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:4px">Admin aapki profile review kar raha hai. Thodi der mein approve ho jayega.</div>
     </div>
 
-    <!-- Scripts -->
-    <script src="firebase.js"></script>
-    <script src="mechanic.js"></script>
+    <!-- Dashboard sections nav -->
+    <div style="display:flex;background:var(--surface);border-bottom:1px solid var(--border);padding:0 16px;overflow-x:auto">
+      <button class="tab active" id="dTab-requests"  style="border-radius:0;border-bottom:3px solid var(--emergency);padding:14px 16px" onclick="switchDashTab('requests')">📋 Requests</button>
+      <button class="tab"        id="dTab-earnings"  style="border-radius:0;padding:14px 16px" onclick="switchDashTab('earnings')">💰 Earnings</button>
+      <button class="tab"        id="dTab-profile"   style="border-radius:0;padding:14px 16px" onclick="switchDashTab('profile')">👤 Profile</button>
+    </div>
+
+    <!-- ── Tab: Requests ── -->
+    <div id="dtab-requests" style="padding:16px">
+
+      <!-- Online / Offline Toggle -->
+      <div class="online-toggle">
+        <div class="ot-info">
+          <h3>🟢 Online Status</h3>
+          <p id="onlineStatusLabel">Offline — requests nahi milenge</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="onlineToggle" onchange="toggleOnlineStatus(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- Stats row -->
+      <div class="stats-row" id="mechStatsRow">
+        <div class="stat-card">
+          <div class="stat-num" id="mStatPending" style="color:var(--warning)">0</div>
+          <div class="stat-lbl">Pending Requests</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="mStatCompleted" style="color:var(--success-lt)">0</div>
+          <div class="stat-lbl">Completed Jobs</div>
+        </div>
+      </div>
+
+      <!-- Live Pending Requests -->
+      <div class="section-title" style="margin-bottom:8px">
+        🔔 Nearby Pending Requests
+        <span class="req-new-badge" id="newReqBadge" style="display:none">NEW</span>
+      </div>
+      <div id="pendingRequestsList">
+        <div class="empty-state">
+          <div class="es-icon">📭</div>
+          <h3>Koi Request Nahi</h3>
+          <p>Online ho jayein — requests milenge</p>
+        </div>
+      </div>
+
+      <!-- My Active Request -->
+      <div id="myActiveRequestSection" style="display:none">
+        <div class="section-title" style="margin:20px 0 8px">⚡ My Active Job</div>
+        <div id="myActiveRequestCard"></div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Earnings ── -->
+    <div id="dtab-earnings" style="padding:16px;display:none">
+      <div class="earning-card">
+        <div class="ec-label">Aaj Ki Kamaai (Estimated)</div>
+        <div class="ec-amount">₹<span id="todayEarning">0</span></div>
+        <div class="ec-sub">Completed jobs based estimate</div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-num" id="totalJobs" style="color:var(--primary-lt)">0</div>
+          <div class="stat-lbl">Total Jobs</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-num" id="mechRating" style="color:var(--warning)">—</div>
+          <div class="stat-lbl">Avg Rating ⭐</div>
+        </div>
+      </div>
+      <div class="section-title" style="margin-bottom:10px">Completed Jobs</div>
+      <div id="completedJobsList">
+        <div class="empty-state"><div class="es-icon">📋</div><h3>Abhi koi job nahi</h3><p>Requests accept karo aur paise kamao</p></div>
+      </div>
+    </div>
+
+    <!-- ── Tab: Profile ── -->
+    <div id="dtab-profile" style="padding:16px;display:none">
+      <div class="profile-header" style="margin:-16px -16px 20px;border-radius:0">
+        <div class="profile-avatar" id="mechProfileAvatar">🔧</div>
+        <div class="profile-name" id="mechProfileName">Loading...</div>
+        <div class="profile-email" id="mechProfileEmail"></div>
+        <div class="profile-role" style="background:#1E88E515;border-color:#1E88E540;color:var(--primary-lt)">🔧 Mechanic</div>
+      </div>
+
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:4px 16px;margin-bottom:16px">
+        <div class="info-row">
+          <div class="ir-icon">📞</div>
+          <div><div class="ir-label">Mobile</div><div class="ir-value" id="mProfPhone">—</div></div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">📍</div>
+          <div><div class="ir-label">Service Area</div><div class="ir-value" id="mProfArea">—</div></div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">🏆</div>
+          <div><div class="ir-label">Experience</div><div class="ir-value" id="mProfExp">—</div></div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">🚗</div>
+          <div><div class="ir-label">Specialization</div><div class="ir-value" id="mProfSpec">—</div></div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">✅</div>
+          <div><div class="ir-label">Approval Status</div><div class="ir-value" id="mProfApproval">—</div></div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">⭐</div>
+          <div><div class="ir-label">Rating</div><div class="ir-value" id="mProfRating">—</div></div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Service Area Update Karein</label>
+        <input type="text" id="mUpdateArea" class="form-control" placeholder="Nayi area likhein">
+      </div>
+      <button class="btn btn-primary btn-full" style="margin-bottom:12px" onclick="updateMechProfile()">Profile Update Karein</button>
+      <button class="btn btn-outline btn-full" onclick="mechSignOut()">🚪 Logout</button>
+    </div>
+
+  </main>
+
+</div><!-- end mechDashboard -->
+
+<script src="firebase.js"></script>
+<script src="mechanic.js"></script>
 </body>
 </html>
