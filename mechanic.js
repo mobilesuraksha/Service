@@ -288,79 +288,70 @@ function checkApprovalStatus() {
 
 // ── Listen Pending Requests (real-time) ───────────────────────
 function listenPendingRequests() {
-  if (pendingReqListener) { pendingReqListener(); }
+  if (pendingReqListener) pendingReqListener();
+
+  if (!mechUser) return;
+
   pendingReqListener = db.collection("requests")
     .where("status", "==", "pending")
     .orderBy("createdAt", "desc")
-    .limit(15)
     .onSnapshot((snap) => {
+
       const reqs = [];
-      snap.forEach(d => reqs.push(d.data()));
+
+      snap.forEach(doc => {
+        const r = doc.data();
+
+        // Mechanic approved + online hona chahiye
+        if (!mechDoc?.isApproved || !mechDoc?.isOnline) return;
+
+        // requestId save karo
+        r.requestId = doc.id;
+
+        reqs.push(r);
+      });
+
       renderPendingRequests(reqs);
-      document.getElementById("mStatPending").textContent = reqs.length;
+
+      // Dono ID support
+      const el1 = document.getElementById("mStatPending");
+      const el2 = document.getElementById("pendingCount");
+
+      if (el1) el1.textContent = reqs.length;
+      if (el2) el2.textContent = "(" + reqs.length + ")";
+
     }, (e) => {
       console.error("listenPendingRequests:", e);
     });
 }
 
-function renderPendingRequests(reqs) {
-  const container = document.getElementById("pendingRequestsList");
-  const badge = document.getElementById("newReqBadge");
-
-  if (!reqs.length) {
-    badge.style.display = "none";
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="es-icon">📭</div>
-        <h3>Koi Pending Request Nahi</h3>
-        <p>Online ho jayein aur wait karein</p>
-      </div>`;
+// ── Accept a Request ──────────────────────────────────────────
+async function acceptRequest(requestId) {
+  if (!mechDoc?.isApproved) {
+    showToast("Admin approval ka wait karein", "warning");
     return;
   }
 
-  badge.style.display = "inline-block";
-  container.innerHTML = reqs.map(r => `
-    <div class="request-card fade-in">
-      <div class="req-meta">
-        <span class="req-tag">${vehicleEmoji(r.vehicleType)} ${capitalize(r.vehicleType)}</span>
-        <span class="req-tag">🔧 ${capitalize(r.problemType)}</span>
-        <span class="req-distance">🕐 ${timeAgo(r.createdAt)}</span>
-      </div>
-      <div style="font-weight:700;font-size:15px;margin-bottom:4px">${r.userName || "User"}</div>
-      <div class="req-desc">
-        📞 ${r.userPhone || "—"}<br>
-        📍 ${r.address || "Location available"}<br>
-        ${r.description ? `💬 ${r.description}` : ""}
-      </div>
-      ${r.locationLat ? `<a class="map-link" href="https://maps.google.com/?q=${r.locationLat},${r.locationLng}" target="_blank" style="margin-bottom:12px;display:inline-flex">📍 Map Par Dekho</a>` : ""}
-      ${r.photoUrl ? `<img src="${r.photoUrl}" style="width:100%;border-radius:var(--radius);max-height:160px;object-fit:cover;margin-bottom:12px" alt="Vehicle Photo">` : ""}
-      <div class="req-actions">
-        <button class="btn btn-success" style="flex:1" onclick="acceptRequest('${r.requestId}','${r.userId}','${r.userName}','${r.userPhone}')">✅ Accept</button>
-        <a href="tel:${r.userPhone}" class="btn btn-primary btn-sm">📞</a>
-        <a href="https://wa.me/91${r.userPhone}" target="_blank" class="btn btn-whatsapp btn-sm">💬</a>
-      </div>
-    </div>`).join("");
-}
-
-// ── Accept a Request ──────────────────────────────────────────
-async function acceptRequest(requestId, userId, userName, userPhone) {
-  if (!mechDoc?.isApproved) {
-    showToast("Admin approval ka wait karein", "warning"); return;
-  }
   if (!mechDoc?.isOnline) {
-    showToast("Pehle online ho jayein", "warning"); return;
+    showToast("Pehle online ho jayein", "warning");
+    return;
   }
+
   setLoading(true);
+
   try {
     await db.collection("requests").doc(requestId).update({
       status: "accepted",
       assignedMechanicId: mechUser.uid,
-      mechanicName: mechDoc.name,
+      mechanicName: mechDoc.name || "",
       mechanicPhone: mechDoc.phone || "",
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
-    showToast("Request accept kar li! Customer ko call karein 📞", "success");
+
+    showToast("Request accept ho gayi ✅", "success");
+
   } catch (e) {
+    console.error(e);
     showToast(e.message, "error");
   } finally {
     setLoading(false);
