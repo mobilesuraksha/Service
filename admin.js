@@ -1,649 +1,430 @@
-// ==================== GLOBAL STATE ====================
-let currentAdmin = null;
-let adminName = "Admin";
-let allUsers = [];
+// ============================================================
+// admin.js — 24x7 Vahan Sahayata — Admin Panel Logic
+// ============================================================
+
+let adminUser = null;
+let allRequests  = [];
 let allMechanics = [];
-let allRequests = [];
-let dashboardStats = {};
+let allUsers     = [];
 
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('Admin app initialized');
-
-    // Check if user is logged in and is admin
-    firebase.onAuthChange(async (user) => {
-        if (user) {
-            const ADMIN_EMAILS = [
-                "admin@vahanshayata.com",
-                "vahanshayata@gmail.com"
-            ];
-
-            if (!ADMIN_EMAILS.includes(user.email)) {
-                alert('You are not authorized to access admin panel');
-                window.location.href = 'index.html';
-                return;
-            }
-
-            currentAdmin = user;
-            adminName = user.displayName || user.email;
-            document.getElementById('adminName').textContent = adminName;
-
-            setupEventListeners();
-            loadDashboard();
-        } else {
-            window.location.href = 'index.html';
-        }
-    });
+// ── Auth ──────────────────────────────────────────────────────
+auth.onAuthStateChanged((user) => {
+  if (user && ADMIN_EMAILS.includes(user.email)) {
+    adminUser = user;
+    document.getElementById("adminLoginGate").style.display = "none";
+    document.getElementById("adminApp").style.display = "block";
+    document.getElementById("adminEmailLabel").textContent = user.email;
+    loadDashboardData();
+  } else if (user && !ADMIN_EMAILS.includes(user.email)) {
+    auth.signOut();
+    showToast("Aap admin nahi hain!", "error");
+  }
 });
 
-// ==================== EVENT LISTENERS ====================
-
-/**
- * Setup all event listeners
- */
-function setupEventListeners() {
-    // Menu navigation
-    document.querySelectorAll('.menu-item').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const page = btn.dataset.page;
-            if (page) {
-                showAdminPage(page);
-            }
-        });
-    });
-
-    // Logout
-    document.getElementById('logoutAdminBtn').addEventListener('click', async () => {
-        const result = await firebase.logoutUser();
-        if (result.success) {
-            showToast('Logged out successfully', 'success');
-            window.location.href = 'index.html';
-        }
-    });
-
-    // Search functionality
-    document.getElementById('usersSearch').addEventListener('input', filterUsersTable);
-    document.getElementById('mechsSearch').addEventListener('input', filterMechsTable);
-    document.getElementById('requestsSearch').addEventListener('input', filterRequestsTable);
+async function adminGoogleLogin() {
+  setLoading(true);
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const result = await auth.signInWithPopup(provider);
+    if (!ADMIN_EMAILS.includes(result.user.email)) {
+      await auth.signOut();
+      showToast("Yeh account admin nahi hai", "error");
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * Show admin page
- */
-function showAdminPage(pageId) {
-    // Hide all pages
-    document.querySelectorAll('.admin-page').forEach(page => {
-        page.classList.remove('active');
-    });
-
-    // Show selected page
-    const page = document.getElementById(pageId + 'Page');
-    if (page) {
-        page.classList.add('active');
-        document.getElementById('pageTitle').textContent = getPageTitle(pageId);
+async function adminEmailLogin() {
+  const email = document.getElementById("adminEmail").value.trim();
+  const pass  = document.getElementById("adminPass").value;
+  if (!email || !pass) { showToast("Email aur password daalein", "warning"); return; }
+  setLoading(true);
+  try {
+    const result = await auth.signInWithEmailAndPassword(email, pass);
+    if (!ADMIN_EMAILS.includes(result.user.email)) {
+      await auth.signOut();
+      showToast("Yeh account admin nahi hai", "error");
     }
-
-    // Update sidebar
-    document.querySelectorAll('.menu-item').forEach(item => {
-        item.classList.remove('active');
-        if (item.dataset.page === pageId) {
-            item.classList.add('active');
-        }
-    });
-
-    // Load page data
-    if (pageId === 'users') {
-        loadUsersTable();
-    } else if (pageId === 'mechanics') {
-        loadMechsTable();
-    } else if (pageId === 'requests') {
-        loadRequestsTable();
-    } else if (pageId === 'analytics') {
-        // Analytics page
-    }
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * Get page title
- */
-function getPageTitle(pageId) {
-    const titles = {
-        'dashboard': '📊 Dashboard',
-        'users': '👥 Users',
-        'mechanics': '🔧 Mechanics',
-        'requests': '📋 Requests',
-        'analytics': '📈 Analytics'
-    };
-    return titles[pageId] || 'Admin Panel';
+async function adminLogout() {
+  await auth.signOut();
+  document.getElementById("adminLoginGate").style.display = "flex";
+  document.getElementById("adminApp").style.display = "none";
 }
 
-// ==================== DASHBOARD ====================
+// ── Section Navigation ────────────────────────────────────────
+function showAdminSection(name) {
+  document.querySelectorAll(".section-panel").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".sidebar-link").forEach(l => l.classList.remove("active"));
+  document.querySelectorAll(".mobile-admin-nav button").forEach((b, i) => {
+    const map = ["overview","requests","mechanics","users"];
+    b.classList.toggle("active", map[i] === name);
+  });
+  const panel = document.getElementById(`panel-${name}`);
+  const sl    = document.getElementById(`sl-${name}`);
+  if (panel) panel.classList.add("active");
+  if (sl)    sl.classList.add("active");
 
-/**
- * Load dashboard
- */
-async function loadDashboard() {
-    showLoading(true);
+  if (name === "requests") loadAllRequests();
+  if (name === "mechanics") loadMechanics();
+  if (name === "users") loadUsers();
+  if (name === "reviews") loadReviews();
+}
 
-    // Get stats
-    const statsResult = await firebase.getDashboardStats();
-    if (statsResult.success) {
-        dashboardStats = statsResult.data;
-        updateDashboardStats();
-    }
-
-    // Load data
-    await Promise.all([
-        loadAllUsers(),
-        loadAllMechanics(),
-        loadAllRequests()
+// ── Load Dashboard Data ───────────────────────────────────────
+async function loadDashboardData() {
+  setLoading(true);
+  try {
+    const [usersSnap, mechSnap, reqSnap] = await Promise.all([
+      db.collection("users").where("role", "==", "user").get(),
+      db.collection("mechanics").get(),
+      db.collection("requests").orderBy("createdAt", "desc").limit(100).get()
     ]);
 
-    showLoading(false);
+    const reqs = [];
+    reqSnap.forEach(d => reqs.push(d.data()));
+    allRequests = reqs;
+
+    const pending   = reqs.filter(r => r.status === "pending").length;
+    const completed = reqs.filter(r => r.status === "completed").length;
+
+    document.getElementById("statUsers").textContent     = usersSnap.size;
+    document.getElementById("statMechanics").textContent = mechSnap.size;
+    document.getElementById("statPending").textContent   = pending;
+    document.getElementById("statCompleted").textContent = completed;
+
+    // Recent 10 requests
+    renderRecentRequests(reqs.slice(0, 10));
+  } catch (e) {
+    showToast("Error loading data: " + e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * Update dashboard stats
- */
-function updateDashboardStats() {
-    document.getElementById('totalUsersAdm').textContent = dashboardStats.totalUsers || 0;
-    document.getElementById('totalMechsAdm').textContent = dashboardStats.totalMechanics || 0;
-    document.getElementById('approvedMechsAdm').textContent = dashboardStats.approvedMechanics || 0;
-    document.getElementById('pendingReqsAdm').textContent = dashboardStats.pendingRequests || 0;
-
-    // Show recent requests
-    const recentRequests = allRequests.slice(0, 5);
-    const recentHTML = recentRequests.length > 0 ? `
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-            ${recentRequests.map(req => `
-                <div style="padding: 10px; background: #F3F4F6; border-radius: 6px;">
-                    <strong>${req.vehicleType} - ${req.problemType}</strong><br>
-                    <small style="color: #666;">${req.userName} | ${formatDate(req.createdAt.toDate())}</small><br>
-                    <small style="color: #999;">${req.status}</small>
-                </div>
-            `).join('')}
+function renderRecentRequests(reqs) {
+  const tbody = document.getElementById("recentReqBody");
+  if (!reqs.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Koi request nahi</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = reqs.map(r => `
+    <tr>
+      <td><span style="font-family:monospace;font-size:12px">${r.requestId}</span></td>
+      <td>${r.userName || "—"}</td>
+      <td>${capitalize(r.vehicleType || "")}</td>
+      <td>${capitalize(r.problemType || "")}</td>
+      <td>${getStatusBadge(r.status)}</td>
+      <td style="font-size:12px">${formatDate(r.createdAt)}</td>
+      <td>
+        <div class="action-btns">
+          <button class="btn btn-primary btn-sm" onclick="openRequestDetail('${r.requestId}')">Manage</button>
+          ${r.locationLat ? `<a class="map-link" href="https://maps.google.com/?q=${r.locationLat},${r.locationLng}" target="_blank">📍 Map</a>` : ""}
         </div>
-    ` : '<p style="color: #999;">No requests yet</p>';
-    document.getElementById('recentRequestsAdm').innerHTML = recentHTML;
-
-    // Show pending approvals
-    const pendingMechs = allMechanics.filter(m => !m.isApproved).slice(0, 5);
-    const pendingHTML = pendingMechs.length > 0 ? `
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-            ${pendingMechs.map(mech => `
-                <div style="padding: 10px; background: #FEF3C7; border-radius: 6px;">
-                    <strong>${mech.name}</strong><br>
-                    <small style="color: #666;">${mech.serviceArea}</small><br>
-                    <div style="margin-top: 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                        <button class="action-btn approve-btn" onclick="approveMechanic('${mech.uid}')">Approve</button>
-                        <button class="action-btn reject-btn" onclick="rejectMechanic('${mech.uid}')">Reject</button>
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-    ` : '<p style="color: #999;">No pending approvals</p>';
-    document.getElementById('pendingApprovalsAdm').innerHTML = pendingHTML;
+      </td>
+    </tr>`).join("");
 }
 
-// ==================== USERS MANAGEMENT ====================
-
-/**
- * Load all users
- */
-async function loadAllUsers() {
-    const result = await firebase.getAllUsers();
-    if (result.success) {
-        allUsers = result.data;
-        loadUsersTable();
-    }
-}
-
-/**
- * Load users table
- */
-function loadUsersTable() {
-    const tbody = document.getElementById('usersTableBody');
-    tbody.innerHTML = '';
-
-    if (allUsers.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No users found</td></tr>';
-        return;
-    }
-
-    allUsers.forEach(user => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td><strong>${user.name}</strong></td>
-            <td>${user.email}</td>
-            <td>${user.phone || '-'}</td>
-            <td>${formatDate(user.createdAt.toDate())}</td>
-            <td>
-                <div class="action-buttons">
-                    <button class="action-btn view-btn" onclick="viewUserDetails('${user.uid}')">View</button>
-                    <button class="action-btn delete-btn" onclick="deleteUserAdmin('${user.uid}')">Delete</button>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-/**
- * Filter users table
- */
-function filterUsersTable() {
-    const searchTerm = document.getElementById('usersSearch').value.toLowerCase();
-    const filtered = allUsers.filter(user => 
-        user.name.toLowerCase().includes(searchTerm) ||
-        user.email.toLowerCase().includes(searchTerm)
-    );
-
-    const tbody = document.getElementById('usersTableBody');
-    tbody.innerHTML = '';
-
-    if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #999;">No users found</td></tr>';
-        return;
-    }
-
-    filtered.forEach(user => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td><strong>${user.name}</strong></td>
-            <td>${user.email}</td>
-            <td>${user.phone || '-'}</td>
-            <td>${formatDate(user.createdAt.toDate())}</td>
-            <td>
-                <div class="action-buttons">
-                    <button class="action-btn view-btn" onclick="viewUserDetails('${user.uid}')">View</button>
-                    <button class="action-btn delete-btn" onclick="deleteUserAdmin('${user.uid}')">Delete</button>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-/**
- * View user details
- */
-function viewUserDetails(userId) {
-    const user = allUsers.find(u => u.uid === userId);
-    if (user) {
-        const details = `
-👤 Name: ${user.name}
-📧 Email: ${user.email}
-📞 Phone: ${user.phone || 'N/A'}
-📅 Joined: ${formatDate(user.createdAt.toDate())}
-        `;
-        alert(details);
-    }
-}
-
-/**
- * Delete user
- */
-async function deleteUserAdmin(userId) {
-    if (!confirm('Are you sure you want to delete this user?')) return;
-
-    showLoading(true);
-    const result = await firebase.deleteUser(userId);
-
-    if (result.success) {
-        allUsers = allUsers.filter(u => u.uid !== userId);
-        loadUsersTable();
-        showToast('User deleted successfully', 'success');
-    } else {
-        showToast('Failed to delete user: ' + result.error, 'error');
-    }
-
-    showLoading(false);
-}
-
-// ==================== MECHANICS MANAGEMENT ====================
-
-/**
- * Load all mechanics
- */
-async function loadAllMechanics() {
-    const result = await firebase.getAllMechanics();
-    if (result.success) {
-        allMechanics = result.data;
-        loadMechsTable();
-    }
-}
-
-/**
- * Load mechanics table
- */
-function loadMechsTable() {
-    const tbody = document.getElementById('mechsTableBody');
-    tbody.innerHTML = '';
-
-    if (allMechanics.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No mechanics found</td></tr>';
-        return;
-    }
-
-    allMechanics.forEach(mech => {
-        const row = document.createElement('tr');
-        const approvalStatus = mech.isApproved ? 
-            '<span class="status-badge status-approved">✅ Approved</span>' :
-            '<span class="status-badge status-pending">⏳ Pending</span>';
-        const onlineStatus = mech.isOnline ? 
-            '<span class="status-badge status-online">🟢 Online</span>' :
-            '<span class="status-badge status-offline">🔴 Offline</span>';
-
-        row.innerHTML = `
-            <td><strong>${mech.name}</strong></td>
-            <td>${mech.phone}</td>
-            <td>${mech.serviceArea}</td>
-            <td>${mech.experience} yrs</td>
-            <td>${approvalStatus}</td>
-            <td>${(mech.rating || 0).toFixed(1)}⭐</td>
-            <td>
-                <div class="action-buttons">
-                    ${!mech.isApproved ? `
-                        <button class="action-btn approve-btn" onclick="approveMechanic('${mech.uid}')">Approve</button>
-                    ` : ''}
-                    <button class="action-btn delete-btn" onclick="deleteMechanicAdmin('${mech.uid}')">Delete</button>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-/**
- * Filter mechanics table
- */
-function filterMechsTable() {
-    const searchTerm = document.getElementById('mechsSearch').value.toLowerCase();
-    const filtered = allMechanics.filter(mech => 
-        mech.name.toLowerCase().includes(searchTerm) ||
-        mech.serviceArea.toLowerCase().includes(searchTerm)
-    );
-
-    const tbody = document.getElementById('mechsTableBody');
-    tbody.innerHTML = '';
-
-    if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No mechanics found</td></tr>';
-        return;
-    }
-
-    filtered.forEach(mech => {
-        const row = document.createElement('tr');
-        const approvalStatus = mech.isApproved ? 
-            '<span class="status-badge status-approved">✅ Approved</span>' :
-            '<span class="status-badge status-pending">⏳ Pending</span>';
-
-        row.innerHTML = `
-            <td><strong>${mech.name}</strong></td>
-            <td>${mech.phone}</td>
-            <td>${mech.serviceArea}</td>
-            <td>${mech.experience} yrs</td>
-            <td>${approvalStatus}</td>
-            <td>${(mech.rating || 0).toFixed(1)}⭐</td>
-            <td>
-                <div class="action-buttons">
-                    ${!mech.isApproved ? `
-                        <button class="action-btn approve-btn" onclick="approveMechanic('${mech.uid}')">Approve</button>
-                    ` : ''}
-                    <button class="action-btn delete-btn" onclick="deleteMechanicAdmin('${mech.uid}')">Delete</button>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
-}
-
-/**
- * Approve mechanic
- */
-async function approveMechanic(mechanicId) {
-    showLoading(true);
-    const result = await firebase.approveMechanic(mechanicId);
-
-    if (result.success) {
-        const mech = allMechanics.find(m => m.uid === mechanicId);
-        if (mech) {
-            mech.isApproved = true;
-        }
-        loadMechsTable();
-        updateDashboardStats();
-        showToast('Mechanic approved successfully', 'success');
-    } else {
-        showToast('Failed to approve mechanic: ' + result.error, 'error');
-    }
-
-    showLoading(false);
-}
-
-/**
- * Reject mechanic
- */
-async function rejectMechanic(mechanicId) {
-    if (!confirm('Are you sure you want to reject this mechanic?')) return;
-
-    showLoading(true);
-    const result = await firebase.rejectMechanic(mechanicId);
-
-    if (result.success) {
-        const mech = allMechanics.find(m => m.uid === mechanicId);
-        if (mech) {
-            mech.isApproved = false;
-        }
-        loadMechsTable();
-        updateDashboardStats();
-        showToast('Mechanic rejected', 'info');
-    } else {
-        showToast('Failed to reject mechanic: ' + result.error, 'error');
-    }
-
-    showLoading(false);
-}
-
-/**
- * Delete mechanic
- */
-async function deleteMechanicAdmin(mechanicId) {
-    if (!confirm('Are you sure you want to delete this mechanic?')) return;
-
-    showLoading(true);
-    const result = await firebase.deleteMechanic(mechanicId);
-
-    if (result.success) {
-        allMechanics = allMechanics.filter(m => m.uid !== mechanicId);
-        loadMechsTable();
-        showToast('Mechanic deleted successfully', 'success');
-    } else {
-        showToast('Failed to delete mechanic: ' + result.error, 'error');
-    }
-
-    showLoading(false);
-}
-
-// ==================== REQUESTS MANAGEMENT ====================
-
-/**
- * Load all requests
- */
+// ── All Requests ──────────────────────────────────────────────
 async function loadAllRequests() {
-    const result = await firebase.getAllRequests();
-    if (result.success) {
-        allRequests = result.data;
-        loadRequestsTable();
-    }
+  setLoading(true);
+  try {
+    const snap = await db.collection("requests").orderBy("createdAt", "desc").get();
+    allRequests = [];
+    snap.forEach(d => allRequests.push(d.data()));
+    filterRequests();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * Load requests table
- */
-function loadRequestsTable() {
-    const tbody = document.getElementById('requestsTableBody');
-    tbody.innerHTML = '';
+function filterRequests() {
+  const search  = (document.getElementById("reqSearch")?.value || "").toLowerCase();
+  const status  = document.getElementById("reqStatusFilter")?.value || "";
+  const vehicle = document.getElementById("reqVehicleFilter")?.value || "";
 
-    if (allRequests.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No requests found</td></tr>';
-        return;
-    }
+  let filtered = allRequests.filter(r => {
+    const matchSearch  = !search || (r.requestId + r.userName + r.userPhone + r.vehicleType).toLowerCase().includes(search);
+    const matchStatus  = !status  || r.status === status;
+    const matchVehicle = !vehicle || r.vehicleType === vehicle;
+    return matchSearch && matchStatus && matchVehicle;
+  });
 
-    allRequests.forEach(req => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td><small>${req.requestId}</small></td>
-            <td>${req.vehicleType}</td>
-            <td>${req.userName}</td>
-            <td><span class="status-badge status-${getStatusClass(req.status)}">${req.status}</span></td>
-            <td>${req.mechanicName || '-'}</td>
-            <td><small>${formatDate(req.createdAt.toDate())}</small></td>
-            <td>
-                <div class="action-buttons">
-                    <button class="action-btn view-btn" onclick="viewRequestDetails('${req.requestId}')">View</button>
-                    <button class="action-btn delete-btn" onclick="deleteRequestAdmin('${req.requestId}')">Delete</button>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(row);
+  const tbody = document.getElementById("allReqBody");
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Koi result nahi mila</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(r => `
+    <tr>
+      <td><span style="font-family:monospace;font-size:11px">${r.requestId}</span></td>
+      <td>${r.userName || "—"}</td>
+      <td><a href="tel:${r.userPhone}" style="color:var(--teal)">${r.userPhone || "—"}</a></td>
+      <td>${capitalize(r.vehicleType || "")}</td>
+      <td>${capitalize(r.problemType || "")}</td>
+      <td>${getStatusBadge(r.status)}</td>
+      <td>${r.mechanicName || `<span style="color:var(--text-dim)">—</span>`}</td>
+      <td style="font-size:11px">${formatDate(r.createdAt)}</td>
+      <td>
+        <div class="action-btns">
+          <select class="form-control" style="padding:5px 8px;font-size:12px;width:auto" onchange="updateRequestStatus('${r.requestId}', this.value)">
+            <option value="">Status</option>
+            <option value="pending"   ${r.status==="pending"  ?"selected":""}>Pending</option>
+            <option value="accepted"  ${r.status==="accepted" ?"selected":""}>Accepted</option>
+            <option value="ontheway"  ${r.status==="ontheway" ?"selected":""}>On The Way</option>
+            <option value="started"   ${r.status==="started"  ?"selected":""}>Started</option>
+            <option value="completed" ${r.status==="completed"?"selected":""}>Completed</option>
+            <option value="cancelled" ${r.status==="cancelled"?"selected":""}>Cancelled</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="assignMechanic('${r.requestId}')">Assign</button>
+          <button class="btn btn-sm" style="background:#EF444420;color:#FC8181;border:1px solid #EF444440" onclick="deleteRequest('${r.requestId}')">🗑</button>
+          ${r.locationLat ? `<a class="map-link" href="https://maps.google.com/?q=${r.locationLat},${r.locationLng}" target="_blank" style="font-size:11px;padding:5px 10px">📍</a>` : ""}
+        </div>
+      </td>
+    </tr>`).join("");
+}
+
+async function updateRequestStatus(requestId, status) {
+  if (!status) return;
+  setLoading(true);
+  try {
+    await db.collection("requests").doc(requestId).update({
+      status, updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    showToast(`Status updated: ${status}`, "success");
+    loadAllRequests();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * Filter requests table
- */
-function filterRequestsTable() {
-    const searchTerm = document.getElementById('requestsSearch').value.toLowerCase();
-    const filtered = allRequests.filter(req => 
-        req.requestId.toLowerCase().includes(searchTerm) ||
-        req.userName.toLowerCase().includes(searchTerm) ||
-        req.vehicleType.toLowerCase().includes(searchTerm)
-    );
+async function assignMechanic(requestId) {
+  // Fetch available mechanics
+  const snap = await db.collection("mechanics").where("isApproved", "==", true).get();
+  const options = [];
+  snap.forEach(d => options.push({ id: d.id, ...d.data() }));
 
-    const tbody = document.getElementById('requestsTableBody');
-    tbody.innerHTML = '';
+  if (!options.length) { showToast("Koi approved mechanic nahi hai", "warning"); return; }
 
-    if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #999;">No requests found</td></tr>';
-        return;
-    }
+  const list = options.map((m, i) => `${i + 1}. ${m.name} (${m.phone || "—"})`).join("\n");
+  const idx = prompt(`Mechanic chunein (number likhein):\n\n${list}`);
+  if (!idx) return;
+  const mech = options[parseInt(idx) - 1];
+  if (!mech) { showToast("Invalid selection", "error"); return; }
 
-    filtered.forEach(req => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td><small>${req.requestId}</small></td>
-            <td>${req.vehicleType}</td>
-            <td>${req.userName}</td>
-            <td><span class="status-badge status-${getStatusClass(req.status)}">${req.status}</span></td>
-            <td>${req.mechanicName || '-'}</td>
-            <td><small>${formatDate(req.createdAt.toDate())}</small></td>
-            <td>
-                <div class="action-buttons">
-                    <button class="action-btn view-btn" onclick="viewRequestDetails('${req.requestId}')">View</button>
-                    <button class="action-btn delete-btn" onclick="deleteRequestAdmin('${req.requestId}')">Delete</button>
-                </div>
-            </td>
-        `;
-        tbody.appendChild(row);
+  setLoading(true);
+  try {
+    await db.collection("requests").doc(requestId).update({
+      assignedMechanicId: mech.uid,
+      mechanicName: mech.name,
+      mechanicPhone: mech.phone || "",
+      status: "accepted",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
+    showToast(`${mech.name} assign ho gaya`, "success");
+    loadAllRequests();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * View request details
- */
-function viewRequestDetails(requestId) {
-    const req = allRequests.find(r => r.requestId === requestId);
-    if (req) {
-        const details = `
-🚗 Vehicle: ${req.vehicleType}
-⚙️ Problem: ${req.problemType}
-👤 Customer: ${req.userName}
-📞 Phone: ${req.userPhone}
-📍 Address: ${req.address}
-${req.landmark ? '🏢 Landmark: ' + req.landmark + '\n' : ''}
-📝 Description: ${req.description}
-📊 Status: ${req.status}
-🔧 Mechanic: ${req.mechanicName || 'Not assigned'}
-📅 Created: ${formatDate(req.createdAt.toDate())}
-        `;
-        alert(details);
+async function deleteRequest(requestId) {
+  if (!confirm("Yeh request delete karna chahte hain?")) return;
+  setLoading(true);
+  try {
+    await db.collection("requests").doc(requestId).delete();
+    showToast("Request delete ho gayi", "success");
+    loadAllRequests();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Mechanics ─────────────────────────────────────────────────
+async function loadMechanics() {
+  setLoading(true);
+  try {
+    const snap = await db.collection("mechanics").orderBy("createdAt", "desc").get();
+    allMechanics = [];
+    snap.forEach(d => allMechanics.push({ id: d.id, ...d.data() }));
+    filterMechanics();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function filterMechanics() {
+  const search = (document.getElementById("mechSearch")?.value || "").toLowerCase();
+  const filtered = allMechanics.filter(m =>
+    !search || (m.name + m.phone + m.serviceArea).toLowerCase().includes(search)
+  );
+  const tbody = document.getElementById("mechBody");
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Koi mechanic nahi</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(m => `
+    <tr>
+      <td><strong>${m.name || "—"}</strong></td>
+      <td><a href="tel:${m.phone}" style="color:var(--teal)">${m.phone || "—"}</a></td>
+      <td>${m.experience || "—"} yrs</td>
+      <td>${m.serviceArea || "—"}</td>
+      <td>${m.isOnline ? `<span class="badge-approved">🟢 Online</span>` : `<span style="color:var(--text-dim)">⚫ Offline</span>`}</td>
+      <td>
+        ${m.isApproved === true  ? `<span class="badge-approved">Approved</span>`  : ""}
+        ${m.isApproved === false ? `<span class="badge-rejected">Rejected</span>`  : ""}
+        ${m.isApproved === undefined || m.isApproved === null ? `<span class="badge-pending">Pending</span>` : ""}
+      </td>
+      <td>${m.rating ? `⭐ ${m.rating}` : "—"}</td>
+      <td>
+        <div class="action-btns">
+          ${m.isApproved !== true  ? `<button class="btn btn-success btn-sm" onclick="approveMechanic('${m.id}',true)">Approve</button>`  : ""}
+          ${m.isApproved !== false ? `<button class="btn btn-sm" style="background:#EF444420;color:#FC8181;border:1px solid #EF444440" onclick="approveMechanic('${m.id}',false)">Reject</button>` : ""}
+          <button class="btn btn-outline btn-sm" onclick="deleteMechanic('${m.id}')">🗑</button>
+        </div>
+      </td>
+    </tr>`).join("");
+}
+
+async function approveMechanic(id, approve) {
+  setLoading(true);
+  try {
+    await db.collection("mechanics").doc(id).update({ isApproved: approve });
+    showToast(approve ? "Mechanic approve ho gaya ✅" : "Mechanic reject ho gaya", approve ? "success" : "warning");
+    loadMechanics();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function deleteMechanic(id) {
+  if (!confirm("Mechanic delete karna chahte hain?")) return;
+  setLoading(true);
+  try {
+    await db.collection("mechanics").doc(id).delete();
+    showToast("Mechanic delete ho gaya", "info");
+    loadMechanics();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Users ─────────────────────────────────────────────────────
+async function loadUsers() {
+  setLoading(true);
+  try {
+    const snap = await db.collection("users").orderBy("createdAt", "desc").get();
+    allUsers = [];
+    snap.forEach(d => allUsers.push({ id: d.id, ...d.data() }));
+    filterUsers();
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function filterUsers() {
+  const search = (document.getElementById("userSearch")?.value || "").toLowerCase();
+  const filtered = allUsers.filter(u =>
+    !search || (u.name + u.email + u.phone).toLowerCase().includes(search)
+  );
+  const tbody = document.getElementById("userBody");
+  if (!filtered.length) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)">Koi user nahi</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filtered.map(u => `
+    <tr>
+      <td><strong>${u.name || "—"}</strong></td>
+      <td>${u.email || "—"}</td>
+      <td>${u.phone || "—"}</td>
+      <td><span class="badge-approved">${u.role || "user"}</span></td>
+      <td style="font-size:12px">${formatDate(u.createdAt)}</td>
+      <td>
+        <button class="btn btn-outline btn-sm" onclick="viewUserRequests('${u.uid}','${u.name}')">Requests</button>
+      </td>
+    </tr>`).join("");
+}
+
+async function viewUserRequests(uid, name) {
+  setLoading(true);
+  try {
+    const snap = await db.collection("requests").where("userId", "==", uid).get();
+    const count = snap.size;
+    alert(`${name} ke total ${count} request(s) hain.`);
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Reviews ───────────────────────────────────────────────────
+async function loadReviews() {
+  const container = document.getElementById("reviewsContainer");
+  container.innerHTML = "Loading...";
+  try {
+    const snap = await db.collection("reviews").orderBy("createdAt", "desc").limit(50).get();
+    if (snap.empty) {
+      container.innerHTML = `<div class="empty-state"><div class="es-icon">⭐</div><h3>Koi review nahi</h3></div>`;
+      return;
     }
+    let html = "";
+    snap.forEach(d => {
+      const r = d.data();
+      html += `
+        <div class="status-card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <strong>Request: ${r.requestId}</strong>
+              <div style="font-size:12px;color:var(--text-muted)">User: ${r.userId} | Mechanic: ${r.mechanicId}</div>
+            </div>
+            <div style="color:var(--warning);font-size:18px">${"★".repeat(r.rating)}${"☆".repeat(5 - r.rating)}</div>
+          </div>
+          <p style="font-size:14px;color:var(--text-muted)">${r.review || "—"}</p>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:8px">${formatDate(r.createdAt)}</div>
+        </div>`;
+    });
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state"><h3>Error: ${e.message}</h3></div>`;
+  }
 }
 
-/**
- * Delete request
- */
-async function deleteRequestAdmin(requestId) {
-    if (!confirm('Are you sure you want to delete this request?')) return;
-
-    showLoading(true);
-    const result = await firebase.deleteRequest(requestId);
-
-    if (result.success) {
-        allRequests = allRequests.filter(r => r.requestId !== requestId);
-        loadRequestsTable();
-        showToast('Request deleted successfully', 'success');
-    } else {
-        showToast('Failed to delete request: ' + result.error, 'error');
-    }
-
-    showLoading(false);
+// ── Utilities ─────────────────────────────────────────────────
+function capitalize(s) {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-/**
- * Get status class for badge
- */
-function getStatusClass(status) {
-    const map = {
-        'Pending': 'pending',
-        'Accepted': 'accepted',
-        'Mechanic On The Way': 'on-way',
-        'Work Started': 'started',
-        'Completed': 'completed',
-        'Cancelled': 'cancelled'
-    };
-    return map[status] || 'pending';
+function openRequestDetail(requestId) {
+  showAdminSection("requests");
+  setTimeout(() => {
+    document.getElementById("reqSearch").value = requestId;
+    filterRequests();
+  }, 200);
 }
-
-// ==================== UTILITY FUNCTIONS ====================
-
-/**
- * Show toast
- */
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `toast show ${type}`;
-    
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 3000);
-}
-
-/**
- * Show loading
- */
-function showLoading(show) {
-    const spinner = document.getElementById('loadingSpinner');
-    if (show) {
-        spinner.classList.add('show');
-    } else {
-        spinner.classList.remove('show');
-    }
-}
-
-/**
- * Format date
- */
-function formatDate(date) {
-    if (!date) return '-';
-    return new Intl.DateTimeFormat('en-IN', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    }).format(date);
-}
-
-console.log('Admin app loaded successfully!');
