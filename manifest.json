@@ -1,96 +1,60 @@
 {
-  "name": "24x7 Vahan Sahayata - Emergency Vehicle Repair Service",
-  "short_name": "Vahan Sahayata",
-  "description": "Instant emergency vehicle repair service. Bike, Car, Tractor ya koi bhi Vahan kharab ho, mistri turant pahunchega.",
+  "name": "24x7 Vahan Sahayata",
+  "short_name": "VahanSahayata",
+  "description": "Bike, Car, Tractor ya Loading Vahan — kahin bhi kharab ho, mistri turant pahunchega.",
   "start_url": "/index.html",
-  "scope": "/",
   "display": "standalone",
+  "background_color": "#0A0E1A",
+  "theme_color": "#E53935",
   "orientation": "portrait-primary",
-  "background_color": "#ffffff",
-  "theme_color": "#DC2626",
-  "categories": ["utilities", "service"],
-  "screenshots": [
-    {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%23DC2626' width='540' height='720'/><text x='270' y='360' dominant-baseline='middle' text-anchor='middle' font-size='100' fill='white' font-family='Arial' font-weight='bold'>🚗</text></svg>",
-      "sizes": "540x720",
-      "type": "image/svg+xml",
-      "form_factor": "narrow"
-    },
-    {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 720'><rect fill='%23DC2626' width='1280' height='720'/><text x='640' y='360' dominant-baseline='middle' text-anchor='middle' font-size='120' fill='white' font-family='Arial' font-weight='bold'>🚗</text></svg>",
-      "sizes": "1280x720",
-      "type": "image/svg+xml",
-      "form_factor": "wide"
-    }
-  ],
+  "lang": "hi-IN",
+  "categories": ["utilities", "lifestyle"],
   "icons": [
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23DC2626' width='192' height='192'/><text x='96' y='96' dominant-baseline='middle' text-anchor='middle' font-size='100' fill='white' font-family='Arial' font-weight='bold'>🚗</text></svg>",
+      "src": "icons/icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml",
-      "purpose": "any"
+      "type": "image/png",
+      "purpose": "any maskable"
     },
     {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23DC2626' width='192' height='192' rx='40'/><text x='96' y='96' dominant-baseline='middle' text-anchor='middle' font-size='100' fill='white' font-family='Arial' font-weight='bold'>🚗</text></svg>",
-      "sizes": "192x192",
-      "type": "image/svg+xml",
-      "purpose": "maskable"
-    },
-    {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%23DC2626' width='512' height='512'/><text x='256' y='256' dominant-baseline='middle' text-anchor='middle' font-size='300' fill='white' font-family='Arial' font-weight='bold'>🚗</text></svg>",
+      "src": "icons/icon-512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
-    {
-      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%23DC2626' width='512' height='512' rx='100'/><text x='256' y='256' dominant-baseline='middle' text-anchor='middle' font-size='300' fill='white' font-family='Arial' font-weight='bold'>🚗</text></svg>",
-      "sizes": "512x512",
-      "type": "image/svg+xml",
-      "purpose": "maskable"
+      "type": "image/png",
+      "purpose": "any maskable"
     }
   ],
+  "screenshots": [],
   "shortcuts": [
     {
-      "name": "Emergency Service",
+      "name": "Emergency Booking",
       "short_name": "Emergency",
-      "description": "Book emergency vehicle repair service now",
-      "url": "/index.html?page=booking",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%23DC2626' width='192' height='192'/><text x='96' y='96' dominant-baseline='middle' text-anchor='middle' font-size='100' fill='white' font-family='Arial' font-weight='bold'>🚨</text></svg>",
-          "sizes": "192x192",
-          "type": "image/svg+xml"
-        }
-      ]
-    },
-    {
-      "name": "My Requests",
-      "short_name": "Requests",
-      "description": "Check status of your service requests",
-      "url": "/index.html?page=status",
-      "icons": [
-        {
-          "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%232563EB' width='192' height='192'/><text x='96' y='96' dominant-baseline='middle' text-anchor='middle' font-size='100' fill='white' font-family='Arial' font-weight='bold'>📋</text></svg>",
-          "sizes": "192x192",
-          "type": "image/svg+xml"
-        }
-      ]
+      "description": "Turant mistri bulayein",
+      "url": "/index.html#booking",
+      "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }]
     }
-  ],
-  "share_target": {
-    "action": "/share",
-    "method": "POST",
-    "enctype": "multipart/form-data",
-    "params": {
-      "title": "title",
-      "text": "text",
-      "url": "url",
-      "files": [
-        {
-          "name": "photo",
-          "accept": ["image/*"]
-        }
-      ]
-    }
-  }
+  ]
 }
