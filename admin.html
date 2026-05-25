@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#E53935">
+  <title>Admin Panel — 24x7 Vahan Sahayata</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-storage-compat.js"></script>
+  <style>
+    /* Admin-specific extras */
+    .mobile-admin-nav {
+      display: none;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+      gap: 8px;
+      overflow-x: auto;
+    }
+    .mobile-admin-nav button {
+      flex-shrink: 0;
+      padding: 8px 14px;
+      border-radius: 30px;
+      background: var(--surface3);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      font-family: var(--font-head);
+    }
+    .mobile-admin-nav button.active {
+      background: #E5393515; border-color: var(--emergency); color: var(--emergency);
+    }
+    @media (max-width: 768px) {
+      .admin-sidebar { display: none !important; }
+      .mobile-admin-nav { display: flex; }
+    }
+    .filter-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    .filter-bar select { background: var(--surface2); border: 1.5px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: var(--radius); font-size: 13px; }
+    .action-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+    .section-panel { display: none; }
+    .section-panel.active { display: block; }
+    .table-container { background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  </style>
+</head>
+<body>
+
+<div id="loadingOverlay"><div class="spinner"></div></div>
+
+<!-- Admin Login Gate -->
+<div id="adminLoginGate" style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">
+  <div class="auth-card" style="max-width:380px">
+    <h2>🛡 Admin Login</h2>
+    <p class="auth-sub">Sirf authorized admins ke liye</p>
+    <button class="btn btn-google btn-full" onclick="adminGoogleLogin()">
+      <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G"> Google se Login Karein
+    </button>
+    <div class="divider">ya</div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" id="adminEmail" class="form-control" placeholder="admin@vahansahayata.com">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Password</label>
+      <input type="password" id="adminPass" class="form-control" placeholder="••••••••">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="adminEmailLogin()">Login</button>
+    <p style="text-align:center;margin-top:16px"><a href="index.html" style="color:var(--text-muted);font-size:13px">← User App Par Jaayein</a></p>
+  </div>
+</div>
+
+<!-- Admin App (hidden until auth) -->
+<div id="adminApp" style="display:none">
+
+  <!-- Mobile Nav -->
+  <div class="mobile-admin-nav" id="mobileAdminNav">
+    <button class="active" onclick="showAdminSection('overview')">📊 Overview</button>
+    <button onclick="showAdminSection('requests')">📋 Requests</button>
+    <button onclick="showAdminSection('mechanics')">🔧 Mechanics</button>
+    <button onclick="showAdminSection('users')">👥 Users</button>
+    <button onclick="adminLogout()">🚪 Logout</button>
+  </div>
+
+  <div class="admin-layout">
+    <!-- Sidebar -->
+    <aside class="admin-sidebar">
+      <div class="brand" style="padding:20px 20px 20px">
+        <div class="brand-icon">🔧</div>
+        <div>
+          <div class="brand-name">Vahan Sahayata</div>
+          <div class="brand-tag">Admin Panel</div>
+        </div>
+      </div>
+
+      <div class="sidebar-nav">
+        <button class="sidebar-link active" id="sl-overview"  onclick="showAdminSection('overview')">
+          <span class="sl-icon">📊</span> Overview
+        </button>
+        <button class="sidebar-link" id="sl-requests"  onclick="showAdminSection('requests')">
+          <span class="sl-icon">📋</span> All Requests
+        </button>
+        <button class="sidebar-link" id="sl-mechanics" onclick="showAdminSection('mechanics')">
+          <span class="sl-icon">🔧</span> Mechanics
+        </button>
+        <button class="sidebar-link" id="sl-users"     onclick="showAdminSection('users')">
+          <span class="sl-icon">👥</span> Users
+        </button>
+        <button class="sidebar-link" id="sl-reviews"   onclick="showAdminSection('reviews')">
+          <span class="sl-icon">⭐</span> Reviews
+        </button>
+        <div style="margin-top:auto;padding-top:24px;border-top:1px solid var(--border)">
+          <button class="sidebar-link" style="color:var(--emergency)" onclick="adminLogout()">
+            <span class="sl-icon">🚪</span> Logout
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="admin-main">
+
+      <!-- ── Overview ── -->
+      <div class="section-panel active" id="panel-overview">
+        <div class="admin-header">
+          <h1>📊 Dashboard Overview</h1>
+          <span id="adminEmailLabel" style="font-size:13px;color:var(--text-muted)"></span>
+        </div>
+
+        <div class="admin-stats" id="adminStatsGrid">
+          <div class="admin-stat-card">
+            <div class="asc-icon">👥</div>
+            <div class="asc-num" id="statUsers">—</div>
+            <div class="asc-lbl">Total Users</div>
+          </div>
+          <div class="admin-stat-card">
+            <div class="asc-icon">🔧</div>
+            <div class="asc-num" id="statMechanics">—</div>
+            <div class="asc-lbl">Total Mechanics</div>
+          </div>
+          <div class="admin-stat-card" style="border-color:#F59E0B40">
+            <div class="asc-icon">⏳</div>
+            <div class="asc-num" id="statPending" style="color:var(--warning)">—</div>
+            <div class="asc-lbl">Pending Requests</div>
+          </div>
+          <div class="admin-stat-card" style="border-color:#10B98140">
+            <div class="asc-icon">✅</div>
+            <div class="asc-num" id="statCompleted" style="color:#10B981">—</div>
+            <div class="asc-lbl">Completed Jobs</div>
+          </div>
+        </div>
+
+        <!-- Recent Requests Table -->
+        <div style="margin-bottom:16px">
+          <div class="section-title">Recent Requests</div>
+        </div>
+        <div class="table-container">
+          <table class="admin-table" id="recentReqTable">
+            <thead><tr>
+              <th>Request ID</th><th>User</th><th>Vehicle</th><th>Problem</th><th>Status</th><th>Date</th><th>Action</th>
+            </tr></thead>
+            <tbody id="recentReqBody"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--text-muted)">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── All Requests ── -->
+      <div class="section-panel" id="panel-requests">
+        <div class="admin-header">
+          <h1>📋 All Requests</h1>
+          <button class="btn btn-outline btn-sm" onclick="loadAllRequests()">🔄 Refresh</button>
+        </div>
+        <div class="filter-bar">
+          <div class="search-bar" style="flex:1;min-width:200px">
+            <span class="si">🔍</span>
+            <input type="text" id="reqSearch" placeholder="Search by user, ID, vehicle..." oninput="filterRequests()">
+          </div>
+          <select id="reqStatusFilter" onchange="filterRequests()">
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="ontheway">On The Way</option>
+            <option value="started">Started</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <select id="reqVehicleFilter" onchange="filterRequests()">
+            <option value="">All Vehicles</option>
+            <option value="bike">Bike</option>
+            <option value="car">Car</option>
+            <option value="tempo">Tempo</option>
+            <option value="loading">Loading</option>
+            <option value="tractor">Tractor</option>
+            <option value="truck">Truck</option>
+          </select>
+        </div>
+        <div class="table-container">
+          <table class="admin-table">
+            <thead><tr>
+              <th>ID</th><th>User</th><th>Phone</th><th>Vehicle</th><th>Problem</th><th>Status</th><th>Mechanic</th><th>Date</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="allReqBody"><tr><td colspan="9" style="text-align:center;padding:24px;color:var(--text-muted)">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Mechanics ── -->
+      <div class="section-panel" id="panel-mechanics">
+        <div class="admin-header">
+          <h1>🔧 Mechanics</h1>
+          <button class="btn btn-outline btn-sm" onclick="loadMechanics()">🔄 Refresh</button>
+        </div>
+        <div class="search-bar" style="max-width:400px">
+          <span class="si">🔍</span>
+          <input type="text" id="mechSearch" placeholder="Search mechanics..." oninput="filterMechanics()">
+        </div>
+        <div class="table-container">
+          <table class="admin-table">
+            <thead><tr>
+              <th>Name</th><th>Phone</th><th>Experience</th><th>Service Area</th><th>Status</th><th>Approval</th><th>Rating</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="mechBody"><tr><td colspan="8" style="text-align:center;padding:24px;color:var(--text-muted)">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Users ── -->
+      <div class="section-panel" id="panel-users">
+        <div class="admin-header">
+          <h1>👥 All Users</h1>
+          <button class="btn btn-outline btn-sm" onclick="loadUsers()">🔄 Refresh</button>
+        </div>
+        <div class="search-bar" style="max-width:400px">
+          <span class="si">🔍</span>
+          <input type="text" id="userSearch" placeholder="Search users..." oninput="filterUsers()">
+        </div>
+        <div class="table-container">
+          <table class="admin-table">
+            <thead><tr>
+              <th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Joined</th><th>Actions</th>
+            </tr></thead>
+            <tbody id="userBody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-muted)">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Reviews ── -->
+      <div class="section-panel" id="panel-reviews">
+        <div class="admin-header">
+          <h1>⭐ Reviews</h1>
+        </div>
+        <div id="reviewsContainer">Loading...</div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="firebase.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
