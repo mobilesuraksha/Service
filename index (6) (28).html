@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="theme-color" content="#E53935">
+  <meta name="description" content="Bike, Car, Tractor ya Loading Vahan — kahin bhi kharab ho, mistri turant pahunchega.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Vahan Sahayata">
+  <title>24x7 Vahan Sahayata — Emergency Vehicle Rescue</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Firebase SDK (compat) -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-storage-compat.js"></script>
+</head>
+<body>
+
+<!-- ── Loading Overlay ─────────────────────────────────────── -->
+<div id="loadingOverlay">
+  <div class="spinner"></div>
+</div>
+
+<!-- ── Install Banner ──────────────────────────────────────── -->
+<div id="installBanner">
+  <div class="ib-icon">📲</div>
+  <div class="ib-text" style="flex:1">
+    <h4>App Install Karein</h4>
+    <p>Home screen par add karein — fast & offline ready</p>
+    <div class="ib-actions">
+      <button class="btn btn-primary btn-sm" id="installBtn">Install App</button>
+      <button class="btn btn-outline btn-sm" id="dismissInstall">Bad Mein</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── App Header ──────────────────────────────────────────── -->
+<header id="appHeader">
+  <div class="brand">
+    <div class="brand-icon">🔧</div>
+    <div>
+      <div class="brand-name">Vahan Sahayata</div>
+      <div class="brand-tag">24x7 Emergency Service</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <span id="userNameLabel"></span>
+    <button class="avatar-btn" id="headerAvatar" onclick="showSection('profile')" title="Profile">
+      <span id="headerAvatarIcon">👤</span>
+    </button>
+  </div>
+</header>
+
+<!-- ── Main Content ─────────────────────────────────────────── -->
+<main id="mainContent">
+
+  <!-- ════════════════════════════════════════════════════════
+       SECTION 1: HOME
+  ════════════════════════════════════════════════════════ -->
+  <section id="section-home" class="app-section active">
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="emergency-badge">🚨 24x7 Emergency Active</div>
+      <h1>24x7 Vahan<br>Sahayata</h1>
+      <p class="tagline">Bike, Car, Tractor ya Loading Vahan — kahin bhi kharab ho, mistri turant pahunchega.</p>
+      <button class="btn-emergency" onclick="handleEmergencyClick()">
+        🆘 Abhi Mistri Bulayein
+      </button>
+      <div class="hero-stats">
+        <div class="hero-stat"><div class="num">5000+</div><div class="lbl">Services Done</div></div>
+        <div class="hero-stat"><div class="num">200+</div><div class="lbl">Mechanics</div></div>
+        <div class="hero-stat"><div class="num">4.8★</div><div class="lbl">Rating</div></div>
+      </div>
+    </div>
+
+    <!-- Services -->
+    <div class="pad-full">
+      <div class="section-title">Hamari Services</div>
+      <div class="section-sub">Koi bhi problem, hum hain haazir</div>
+
+      <div class="service-card" onclick="startBooking('puncture')">
+        <div class="sc-icon" style="background:#E5393515">🔩</div>
+        <div class="sc-info">
+          <h3>Puncture / Tyre</h3>
+          <p>On-spot puncture repair & tyre change</p>
+        </div>
+        <div class="sc-arrow">›</div>
+      </div>
+
+      <div class="service-card" onclick="startBooking('engine')">
+        <div class="sc-icon" style="background:#1565C015">⚙️</div>
+        <div class="sc-info">
+          <h3>Engine Problem</h3>
+          <p>Engine start nahi ho raha? Mistri aayega</p>
+        </div>
+        <div class="sc-arrow">›</div>
+      </div>
+
+      <div class="service-card" onclick="startBooking('battery')">
+        <div class="sc-icon" style="background:#F59E0B15">🔋</div>
+        <div class="sc-info">
+          <h3>Battery / Jumpstart</h3>
+          <p>Dead battery? Turant jumpstart milega</p>
+        </div>
+        <div class="sc-arrow">›</div>
+      </div>
+
+      <div class="service-card" onclick="startBooking('towing')">
+        <div class="sc-icon" style="background:#8B5CF615">🚛</div>
+        <div class="sc-info">
+          <h3>Towing Service</h3>
+          <p>Vahan khud nahi chal sakta? Towing milega</p>
+        </div>
+        <div class="sc-arrow">›</div>
+      </div>
+
+      <div class="service-card" onclick="startBooking('accident')">
+        <div class="sc-icon" style="background:#EF444415">🚨</div>
+        <div class="sc-info">
+          <h3>Accident Sahayata</h3>
+          <p>Accident ke baad turant help</p>
+        </div>
+        <div class="sc-arrow">›</div>
+      </div>
+
+      <div class="service-card" onclick="startBooking('other')">
+        <div class="sc-icon" style="background:#06B6D415">🔧</div>
+        <div class="sc-info">
+          <h3>Kuch Aur</h3>
+          <p>Brake, fuel, oil, aur baaki problems</p>
+        </div>
+        <div class="sc-arrow">›</div>
+      </div>
+
+      <!-- Quick Links -->
+      <div style="display:flex;gap:10px;margin-top:20px;margin-bottom:24px">
+        <a href="mechanic.html" class="btn btn-outline" style="flex:1;font-size:13px">🔧 Mistri Registration</a>
+        <a href="admin.html" class="btn btn-outline" style="flex:1;font-size:13px">🛡 Admin Panel</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
+       SECTION 2: AUTH (Login / Register)
+  ════════════════════════════════════════════════════════ -->
+  <section id="section-auth" class="app-section">
+    <div class="pad-full">
+
+      <div class="tabs" style="max-width:420px;margin:0 auto 0">
+        <button class="tab active" id="tabLogin"  onclick="switchAuthTab('login')">Login</button>
+        <button class="tab"        id="tabReg"    onclick="switchAuthTab('register')">Register</button>
+      </div>
+
+      <!-- Login Form -->
+      <div id="loginForm" class="auth-card slide-up">
+        <h2>👋 Wapas Aaiye!</h2>
+        <p class="auth-sub">Apne account mein login karein</p>
+
+        <button class="btn btn-google btn-full" onclick="signInWithGoogle()">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G"> Google se Login Karein
+        </button>
+
+        <div class="divider">ya email se</div>
+
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" id="loginEmail" class="form-control" placeholder="aapka@email.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password</label>
+          <input type="password" id="loginPassword" class="form-control" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="emailLogin()">Login Karein</button>
+
+        <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-muted)">
+          Account nahi hai? <span onclick="switchAuthTab('register')" style="color:var(--primary-lt);cursor:pointer;font-weight:700">Register Karein</span>
+        </p>
+      </div>
+
+      <!-- Register Form -->
+      <div id="registerForm" class="auth-card slide-up" style="display:none">
+        <h2>🆕 New Account</h2>
+        <p class="auth-sub">Abhi register karein — bilkul free!</p>
+
+        <button class="btn btn-google btn-full" onclick="signInWithGoogle()">
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="20" alt="G"> Google se Register Karein
+        </button>
+
+        <div class="divider">ya email se</div>
+
+        <div class="form-group">
+          <label class="form-label">Pura Naam</label>
+          <input type="text" id="regName" class="form-control" placeholder="Aapka naam">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Mobile Number</label>
+          <input type="tel" id="regPhone" class="form-control" placeholder="9876543210">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email Address</label>
+          <input type="email" id="regEmail" class="form-control" placeholder="aapka@email.com">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Password (min 6 characters)</label>
+          <input type="password" id="regPassword" class="form-control" placeholder="••••••••">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="emailRegister()">Register Karein</button>
+
+        <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-muted)">
+          Pehle se account hai? <span onclick="switchAuthTab('login')" style="color:var(--primary-lt);cursor:pointer;font-weight:700">Login Karein</span>
+        </p>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
+       SECTION 3: BOOKING
+  ════════════════════════════════════════════════════════ -->
+  <section id="section-booking" class="app-section">
+
+    <div class="booking-header">
+      <h2>🆘 Emergency Booking</h2>
+      <p>Neeche form bharein — mistri jaldi pahunchega</p>
+    </div>
+
+    <div class="pad-full">
+
+      <!-- Urgent Alert -->
+      <div class="urgent-alert">
+        <div class="ua-icon">⚡</div>
+        <p>Aapki location aur vahan ki jankari bharkar <strong>Abhi Bhejein</strong> dabayein. Nearest mechanic ko turant request milega.</p>
+      </div>
+
+      <!-- Vehicle Type -->
+      <div class="section-title" style="margin-bottom:8px">Vehicle Type चुनें</div>
+      <div class="vehicle-grid" id="vehicleGrid">
+        <div class="vehicle-card" data-v="bike"    onclick="selectVehicle(this)"><div class="vc-icon">🏍️</div><div class="vc-name">Bike</div></div>
+        <div class="vehicle-card" data-v="car"     onclick="selectVehicle(this)"><div class="vc-icon">🚗</div><div class="vc-name">Car</div></div>
+        <div class="vehicle-card" data-v="tempo"   onclick="selectVehicle(this)"><div class="vc-icon">🚐</div><div class="vc-name">Max/Tempo</div></div>
+        <div class="vehicle-card" data-v="loading" onclick="selectVehicle(this)"><div class="vc-icon">🚚</div><div class="vc-name">Loading</div></div>
+        <div class="vehicle-card" data-v="tractor" onclick="selectVehicle(this)"><div class="vc-icon">🚜</div><div class="vc-name">Tractor</div></div>
+        <div class="vehicle-card" data-v="truck"   onclick="selectVehicle(this)"><div class="vc-icon">🛻</div><div class="vc-name">Truck</div></div>
+        <div class="vehicle-card" data-v="auto"    onclick="selectVehicle(this)"><div class="vc-icon">🛺</div><div class="vc-name">Auto</div></div>
+        <div class="vehicle-card" data-v="other"   onclick="selectVehicle(this)"><div class="vc-icon">🚘</div><div class="vc-name">Other</div></div>
+      </div>
+
+      <!-- Problem Type -->
+      <div class="section-title" style="margin-bottom:8px">Problem Type</div>
+      <div class="chips" id="problemChips">
+        <span class="chip" data-p="puncture"  onclick="selectProblem(this)">🔩 Puncture</span>
+        <span class="chip" data-p="engine"    onclick="selectProblem(this)">⚙️ Engine</span>
+        <span class="chip" data-p="battery"   onclick="selectProblem(this)">🔋 Battery</span>
+        <span class="chip" data-p="fuel"      onclick="selectProblem(this)">⛽ Fuel Khatam</span>
+        <span class="chip" data-p="brake"     onclick="selectProblem(this)">🛑 Brake</span>
+        <span class="chip" data-p="accident"  onclick="selectProblem(this)">🚨 Accident</span>
+        <span class="chip" data-p="towing"    onclick="selectProblem(this)">🚛 Towing</span>
+        <span class="chip" data-p="other"     onclick="selectProblem(this)">🔧 Kuch Aur</span>
+      </div>
+
+      <!-- Description -->
+      <div class="form-group">
+        <label class="form-label">Problem ka Vivaran (Optional)</label>
+        <textarea id="bookingDesc" class="form-control" placeholder="Kya hua hai detail mein batayein..."></textarea>
+      </div>
+
+      <!-- Location -->
+      <div class="section-title" style="margin-bottom:8px">Aapki Location</div>
+      <div class="location-card" id="locationCard" onclick="getLocation()">
+        <div class="loc-icon">📍</div>
+        <div class="loc-text">
+          <strong id="locationText">Location Detect Karein</strong>
+          <span id="locationCoords">GPS se current location lene ke liye click karein</span>
+        </div>
+        <span style="color:var(--teal);font-size:18px">↻</span>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Address / Landmark</label>
+        <input type="text" id="bookingAddress" class="form-control" placeholder="Gali, mohalla, landmark...">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Phone Number (for mechanic)</label>
+        <input type="tel" id="bookingPhone" class="form-control" placeholder="9876543210">
+      </div>
+
+      <!-- Photo Upload -->
+      <div class="form-group">
+        <label class="form-label">Vahan ki Photo (Optional)</label>
+        <label class="file-upload" for="vehiclePhoto">
+          <input type="file" id="vehiclePhoto" accept="image/*" onchange="previewPhoto(this)">
+          <div class="fu-icon">📷</div>
+          <div class="fu-text">Photo khenchein ya gallery se chunein</div>
+        </label>
+        <img id="photoPreview" alt="Preview">
+      </div>
+
+      <button class="btn btn-danger btn-full" style="margin-bottom:32px" onclick="submitRequest()">
+        🆘 Abhi Mistri Bhejein
+      </button>
+
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
+       SECTION 4: REQUEST STATUS
+  ════════════════════════════════════════════════════════ -->
+  <section id="section-status" class="app-section">
+    <div class="pad-full">
+      <div class="section-title">🔄 Live Request Status</div>
+      <div class="section-sub">Aapke active aur past requests</div>
+
+      <div id="activeRequestArea"></div>
+      <div id="requestHistoryArea"></div>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
+       SECTION 5: PROFILE
+  ════════════════════════════════════════════════════════ -->
+  <section id="section-profile" class="app-section">
+
+    <div class="profile-header">
+      <div class="profile-avatar" id="profileAvatar">👤</div>
+      <div class="profile-name"  id="profileName">Loading...</div>
+      <div class="profile-email" id="profileEmail"></div>
+      <div class="profile-role">👤 User</div>
+    </div>
+
+    <div class="pad-full">
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:4px 16px;margin-bottom:16px">
+        <div class="info-row">
+          <div class="ir-icon">📞</div>
+          <div>
+            <div class="ir-label">Mobile</div>
+            <div class="ir-value" id="profilePhone">—</div>
+          </div>
+          <div class="ir-action" onclick="editPhone()">Edit</div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">📧</div>
+          <div>
+            <div class="ir-label">Email</div>
+            <div class="ir-value" id="profileEmailRow">—</div>
+          </div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">📅</div>
+          <div>
+            <div class="ir-label">Member Since</div>
+            <div class="ir-value" id="profileJoined">—</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:4px 16px;margin-bottom:16px">
+        <div class="info-row" onclick="showSection('status')" style="cursor:pointer">
+          <div class="ir-icon">📋</div>
+          <div><div class="ir-label">Meri Requests</div><div class="ir-value">History Dekhein</div></div>
+          <div class="sc-arrow">›</div>
+        </div>
+        <div class="info-row" onclick="showSection('contact')" style="cursor:pointer">
+          <div class="ir-icon">💬</div>
+          <div><div class="ir-label">Support</div><div class="ir-value">Help & Contact</div></div>
+          <div class="sc-arrow">›</div>
+        </div>
+        <div class="info-row">
+          <div class="ir-icon">🔧</div>
+          <div><div class="ir-label">Mechanic Register</div><div class="ir-value">Mistri banna chahte hain?</div></div>
+          <a href="mechanic.html" class="ir-action">Open</a>
+        </div>
+      </div>
+
+      <button class="btn btn-outline btn-full" onclick="signOutUser()" style="margin-bottom:24px">
+        🚪 Logout
+      </button>
+    </div>
+  </section>
+
+  <!-- ════════════════════════════════════════════════════════
+       SECTION 6: CONTACT
+  ════════════════════════════════════════════════════════ -->
+  <section id="section-contact" class="app-section">
+    <div class="pad-full">
+      <div class="section-title">📞 Help & Support</div>
+      <div class="section-sub">Hum 24x7 aapki seva mein hain</div>
+
+      <div class="contact-card">
+        <div class="cc-icon">📞</div>
+        <h3>Helpline</h3>
+        <p>Emergency ke liye turant call karein</p>
+        <a href="tel:+919876543210" class="btn btn-danger btn-full" style="margin-top:12px">Call: +91 98765 43210</a>
+      </div>
+
+      <div class="contact-card">
+        <div class="cc-icon">💬</div>
+        <h3>WhatsApp Support</h3>
+        <p>WhatsApp par bhi help milegi</p>
+        <a href="https://wa.me/919876543210?text=Namaste%2C%20mujhe%20vehicle%20help%20chahiye" target="_blank" class="btn btn-whatsapp btn-full" style="margin-top:12px">WhatsApp Karein</a>
+      </div>
+
+      <div class="contact-card">
+        <div class="cc-icon">📧</div>
+        <h3>Email Support</h3>
+        <p>Non-urgent queries ke liye email karein</p>
+        <a href="mailto:support@vahansahayata.com" class="btn btn-outline btn-full" style="margin-top:12px">Email Karein</a>
+      </div>
+
+      <div class="contact-card" style="text-align:left;padding:20px">
+        <h3 style="margin-bottom:12px">📝 Feedback Bhejein</h3>
+        <div class="form-group">
+          <textarea id="feedbackText" class="form-control" placeholder="Aapka anubhav kaise raha? Kuch batana chahte hain?" rows="4"></textarea>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="submitFeedback()">Feedback Bhejein</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Bottom Navigation ─────────────────────────────────── -->
+<nav id="bottomNav">
+  <button class="nav-item active" id="nav-home"    onclick="showSection('home')">
+    <span class="nav-icon">🏠</span>Home
+  </button>
+  <button class="nav-item"        id="nav-booking" onclick="showSection('booking')">
+    <span class="nav-icon">🆘</span>Booking
+  </button>
+  <button class="nav-item"        id="nav-status"  onclick="showSection('status')">
+    <span class="nav-icon">📋</span>Status
+    <span class="notif-dot" id="statusDot" style="display:none"></span>
+  </button>
+  <button class="nav-item"        id="nav-contact" onclick="showSection('contact')">
+    <span class="nav-icon">💬</span>Support
+  </button>
+  <button class="nav-item"        id="nav-profile" onclick="showSection('profile')">
+    <span class="nav-icon">👤</span>Profile
+  </button>
+</nav>
+
+<!-- ── Rating Modal ──────────────────────────────────────── -->
+<div id="ratingModal" style="display:none;position:fixed;inset:0;background:#000a;z-index:5000;align-items:center;justify-content:center;padding:24px">
+  <div style="background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-lg);padding:28px;max-width:380px;width:100%">
+    <h3 style="font-family:var(--font-head);font-size:22px;margin-bottom:6px">⭐ Service Rate Karein</h3>
+    <p style="font-size:14px;color:var(--text-muted);margin-bottom:20px" id="ratingMechName">Mechanic ka naam</p>
+    <div class="stars" id="starContainer" style="justify-content:center;margin-bottom:20px">
+      <span class="star" data-v="1" onclick="selectStar(1)">★</span>
+      <span class="star" data-v="2" onclick="selectStar(2)">★</span>
+      <span class="star" data-v="3" onclick="selectStar(3)">★</span>
+      <span class="star" data-v="4" onclick="selectStar(4)">★</span>
+      <span class="star" data-v="5" onclick="selectStar(5)">★</span>
+    </div>
+    <textarea id="reviewText" class="form-control" style="margin-bottom:16px" rows="3" placeholder="Review likhein (optional)..."></textarea>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-outline" style="flex:1" onclick="closeRating()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1" onclick="submitRating()">Submit</button>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script src="firebase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
