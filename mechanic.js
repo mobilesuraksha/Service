@@ -287,22 +287,42 @@ function checkApprovalStatus() {
 }
 
 // ── Listen Pending Requests (real-time) ───────────────────────
+
 function listenPendingRequests() {
-  if (pendingReqListener) { pendingReqListener(); }
+  if (pendingReqListener) pendingReqListener();
+
+  if (!mechUser || !mechDoc) return;
+
   pendingReqListener = db.collection("requests")
     .where("status", "==", "pending")
     .orderBy("createdAt", "desc")
-    .limit(15)
     .onSnapshot((snap) => {
-      const reqs = [];
-      snap.forEach(d => reqs.push(d.data()));
+
+      let reqs = [];
+
+      snap.forEach(doc => {
+        const r = doc.data();
+
+        // Approved + Online check
+        if (!mechDoc.isApproved || !mechDoc.isOnline) return;
+
+        // Vehicle type match
+        if (
+          mechDoc.vehicleTypes &&
+          mechDoc.vehicleTypes.length > 0 &&
+          !mechDoc.vehicleTypes.includes(r.vehicleType)
+        ) return;
+
+        reqs.push(r);
+      });
+
       renderPendingRequests(reqs);
       document.getElementById("mStatPending").textContent = reqs.length;
+
     }, (e) => {
-      console.error("listenPendingRequests:", e);
+      console.error(e);
     });
 }
-
 function renderPendingRequests(reqs) {
   const container = document.getElementById("pendingRequestsList");
   const badge = document.getElementById("newReqBadge");
