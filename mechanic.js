@@ -1,403 +1,551 @@
-// ==================== GLOBAL STATE ====================
-let currentMechanic = null;
-let mechanicProfile = null;
-let isOnline = false;
-let selectedRequests = {};
+// ============================================================
+// mechanic.js — 24x7 Vahan Sahayata — Mechanic Dashboard Logic
+// ============================================================
 
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('Mechanic app initialized');
-    
-    // Check if user is logged in
-    firebase.onAuthChange(async (user) => {
-        if (user) {
-            const profile = await firebase.getMechanicProfile(user.uid);
-            if (profile.success) {
-                currentMechanic = user;
-                mechanicProfile = profile.data;
-                
-                // Check if approved
-                if (!mechanicProfile.isApproved) {
-                    alert('Your profile is not approved yet. Redirecting to home.');
-                    window.location.href = 'index.html';
-                    return;
-                }
-                
-                loadMechanicDashboard();
-                setupEventListeners();
-            } else {
-                window.location.href = 'index.html';
-            }
-        } else {
-            window.location.href = 'index.html';
-        }
-    });
+// ── State ────────────────────────────────────────────────────
+let mechUser     = null;
+let mechDoc      = null;
+let selectedSpecs = [];
+let pendingReqListener   = null;
+let myActiveReqListener  = null;
+
+// ── Auth Observer ─────────────────────────────────────────────
+auth.onAuthStateChanged(async (user) => {
+  if (user) {
+    mechUser = user;
+    const snap = await db.collection("mechanics").doc(user.uid).get();
+    if (snap.exists) {
+      mechDoc = snap.data();
+      showMechDashboard();
+    }
+    // If it's an admin, redirect
+    if (ADMIN_EMAILS.includes(user.email)) {
+      window.location.href = "admin.html";
+    }
+  } else {
+    mechUser = null;
+    mechDoc  = null;
+    showMechAuth();
+  }
 });
 
-// ==================== UI SETUP ====================
+function showMechAuth() {
+  document.getElementById("mechAuthGate").style.display = "block";
+  document.getElementById("mechDashboard").style.display = "none";
+}
 
-/**
- * Setup event listeners
- */
-function setupEventListeners() {
-    // Online toggle
-    document.getElementById('onlineToggle').addEventListener('click', toggleOnlineStatus);
+function showMechDashboard() {
+  document.getElementById("mechAuthGate").style.display = "none";
+  document.getElementById("mechDashboard").style.display = "block";
+  populateMechProfile();
+  loadMechStats();
+  listenPendingRequests();
+  listenMyActiveRequest();
+  checkApprovalStatus();
+}
 
-    // Logout
-    document.getElementById('logoutMechBtn').addEventListener('click', async () => {
-        const result = await firebase.logoutUser();
-        if (result.success) {
-            showToast('Logged out successfully', 'success');
-            window.location.href = 'index.html';
-        }
+// ── Auth UI toggle ────────────────────────────────────────────
+function switchMechTab(tab) {
+  const isLogin = (tab === "login");
+  document.getElementById("mechLoginForm").style.display  = isLogin ? "" : "none";
+  document.getElementById("mechRegForm").style.display    = isLogin ? "none" : "";
+  document.getElementById("mTabLogin").classList.toggle("active",  isLogin);
+  document.getElementById("mTabReg").classList.toggle("active", !isLogin);
+  if (!isLogin) { goToStep(1); }
+}
+
+// ── Registration steps ────────────────────────────────────────
+function goToStep(n) {
+  [1, 2, 3].forEach(i => {
+    const el = document.getElementById(`regStep${i}`);
+    if (el) el.style.display = (i === n) ? "" : "none";
+    const dot = document.getElementById(`step${i}dot`);
+    if (dot) {
+      dot.classList.remove("active", "done");
+      if (i < n)  dot.classList.add("done");
+      if (i === n) dot.classList.add("active");
+    }
+  });
+  if (n === 2) {
+    const name  = document.getElementById("mRegName").value.trim();
+    const phone = document.getElementById("mRegPhone").value.trim();
+    const email = document.getElementById("mRegEmail").value.trim();
+    const pass  = document.getElementById("mRegPass").value;
+    if (!name || !phone || !email || !pass) {
+      showToast("Saare fields bharein", "warning");
+      goToStep(1); return;
+    }
+    if (pass.length < 6) {
+      showToast("Password min 6 characters chahiye", "warning");
+      goToStep(1); return;
+    }
+  }
+  if (n === 3) {
+    const exp  = document.getElementById("mRegExp").value;
+    const area = document.getElementById("mRegArea").value.trim();
+    if (!exp || !area) {
+      showToast("Experience aur service area daalein", "warning");
+      goToStep(2); return;
+    }
+    if (selectedSpecs.length === 0) {
+      showToast("Kam se kam ek vehicle specialization chunein", "warning");
+      goToStep(2); return;
+    }
+  }
+}
+
+function toggleSpec(el, val) {
+  const cb = el.querySelector("input[type=checkbox]");
+  const isSelected = selectedSpecs.includes(val);
+  if (isSelected) {
+    selectedSpecs = selectedSpecs.filter(s => s !== val);
+    cb.checked = false;
+    el.classList.remove("selected");
+  } else {
+    selectedSpecs.push(val);
+    cb.checked = true;
+    el.classList.add("selected");
+  }
+}
+
+function previewMechPhoto(input) {
+  const prev = document.getElementById("mechPhotoPreview");
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = e => { prev.src = e.target.result; prev.style.display = "block"; };
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+// ── Google Login ──────────────────────────────────────────────
+async function mechGoogleLogin() {
+  setLoading(true);
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const result = await auth.signInWithPopup(provider);
+    const user = result.user;
+
+    // Check if mechanic doc exists, if not create new profile
+    const snap = await db.collection("mechanics").doc(user.uid).get();
+    if (!snap.exists) {
+      await db.collection("mechanics").doc(user.uid).set({
+        uid: user.uid,
+        name: user.displayName || "",
+        email: user.email || "",
+        phone: user.phoneNumber || "",
+        experience: "",
+        vehicleTypes: [],
+        serviceArea: "",
+        isApproved: null,
+        isOnline: false,
+        rating: null,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      showToast("Registered! Profile complete karein", "success");
+    } else {
+      showToast("Login successful! 🎉", "success");
+    }
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function mechEmailLogin() {
+  const email = document.getElementById("mLoginEmail").value.trim();
+  const pass  = document.getElementById("mLoginPass").value;
+  if (!email || !pass) { showToast("Email aur password daalein", "warning"); return; }
+  setLoading(true);
+  try {
+    await auth.signInWithEmailAndPassword(email, pass);
+    showToast("Login successful!", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function completeMechRegistration() {
+  const name  = document.getElementById("mRegName").value.trim();
+  const phone = document.getElementById("mRegPhone").value.trim();
+  const email = document.getElementById("mRegEmail").value.trim();
+  const pass  = document.getElementById("mRegPass").value;
+  const exp   = document.getElementById("mRegExp").value;
+  const area  = document.getElementById("mRegArea").value.trim();
+  const aadhaar = document.getElementById("mRegAadhaar").value.trim();
+
+  setLoading(true);
+  try {
+    // Create Firebase Auth user
+    const cred = await auth.createUserWithEmailAndPassword(email, pass);
+    await cred.user.updateProfile({ displayName: name });
+
+    let photoURL = "";
+    const photoFile = document.getElementById("mechPhoto").files[0];
+    if (photoFile) {
+      const ref = storage.ref(`mechanic-photos/${cred.user.uid}/${Date.now()}`);
+      const snap = await ref.put(photoFile);
+      photoURL = await snap.ref.getDownloadURL();
+    }
+
+    // Save mechanic doc to Firestore
+    await db.collection("mechanics").doc(cred.user.uid).set({
+      uid: cred.user.uid,
+      name, email, phone,
+      experience: exp,
+      vehicleTypes: selectedSpecs,
+      serviceArea: area,
+      aadhaar: aadhaar || "",
+      photoURL,
+      isApproved: null,   // null = pending
+      isOnline: false,
+      rating: null,
+      totalJobs: 0,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
-    // Refresh every 5 seconds
-    setInterval(() => {
-        if (isOnline) {
-            loadPendingRequests();
-            loadActiveJobs();
-            updateLocation();
-        }
-    }, 5000);
+    // Also create a user-role doc so they're recognized in users collection
+    await db.collection("users").doc(cred.user.uid).set({
+      uid: cred.user.uid, name, email, phone,
+      role: "mechanic",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    showToast("Registration complete! Admin approval ka wait karein 🙏", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * Load mechanic dashboard
- */
-async function loadMechanicDashboard() {
-    // Load profile info
-    document.getElementById('mechnicName').textContent = mechanicProfile.name;
-    document.getElementById('mechName').textContent = mechanicProfile.name;
-    document.getElementById('mechPhone').textContent = mechanicProfile.phone;
-    document.getElementById('mechExp').textContent = mechanicProfile.experience;
-    document.getElementById('mechArea').textContent = mechanicProfile.serviceArea;
-    document.getElementById('mechRating').textContent = (mechanicProfile.rating || 0).toFixed(1);
-
-    // Update online status
-    isOnline = mechanicProfile.isOnline || false;
-    updateOnlineUI();
-
-    // Load requests and jobs
-    loadPendingRequests();
-    loadActiveJobs();
+async function mechSignOut() {
+  // Go offline before signing out
+  if (mechUser && mechDoc) {
+    await db.collection("mechanics").doc(mechUser.uid).update({ isOnline: false }).catch(() => {});
+  }
+  await auth.signOut();
+  showMechAuth();
 }
 
-/**
- * Toggle online status
- */
-async function toggleOnlineStatus() {
-    showLoading(true);
-    isOnline = !isOnline;
-
-    const result = await firebase.updateMechanicStatus(currentMechanic.uid, isOnline);
-
-    if (result.success) {
-        mechanicProfile.isOnline = isOnline;
-        updateOnlineUI();
-        showToast(
-            isOnline ? 'You are now Online! 🟢' : 'You are now Offline 🔴',
-            'success'
-        );
-    } else {
-        isOnline = !isOnline; // Revert
-        showToast('Failed to update status', 'error');
+// ── Dashboard Tab Switching ───────────────────────────────────
+function switchDashTab(tab) {
+  ["requests", "earnings", "profile"].forEach(t => {
+    document.getElementById(`dtab-${t}`).style.display = (t === tab) ? "block" : "none";
+    const btn = document.getElementById(`dTab-${t}`);
+    if (btn) {
+      btn.classList.toggle("active", t === tab);
+      btn.style.borderBottom = t === tab ? "3px solid var(--emergency)" : "3px solid transparent";
     }
-
-    showLoading(false);
+  });
+  if (tab === "earnings") loadCompletedJobs();
 }
 
-/**
- * Update online UI
- */
-function updateOnlineUI() {
-    const toggle = document.getElementById('onlineToggle');
-    const status = document.getElementById('onlineStatus');
-    const statusText = document.getElementById('statusText');
-    const message = document.getElementById('statusMessage');
+// ── Online / Offline Toggle ───────────────────────────────────
+async function toggleOnlineStatus(isOnline) {
+  if (!mechDoc?.isApproved) {
+    showToast("Admin approval ka wait karein", "warning");
+    document.getElementById("onlineToggle").checked = false;
+    return;
+  }
+  try {
+    await db.collection("mechanics").doc(mechUser.uid).update({ isOnline });
+    mechDoc.isOnline = isOnline;
+    document.getElementById("onlineStatusLabel").textContent =
+      isOnline ? "🟢 Online — requests mil rahe hain" : "⚫ Offline — requests nahi milenge";
+    document.getElementById("mechOnlineDot").style.background =
+      isOnline ? "var(--success-lt)" : "var(--text-dim)";
+    showToast(isOnline ? "Aap online hain! 🟢" : "Aap offline ho gaye", isOnline ? "success" : "info");
+  } catch (e) {
+    showToast(e.message, "error");
+  }
+}
 
-    if (isOnline) {
-        toggle.classList.add('active');
-        status.textContent = '🟢 Online';
-        statusText.textContent = 'You are Online - Receiving requests';
-        message.textContent = 'You will receive notifications when a customer requests service in your area.';
-        message.style.color = '#16A34A';
-    } else {
-        toggle.classList.remove('active');
-        status.textContent = '🔴 Offline';
-        statusText.textContent = 'You are Offline';
-        message.textContent = 'Go Online to start receiving requests';
-        message.style.color = '#DC2626';
+// ── Approval Status ───────────────────────────────────────────
+function checkApprovalStatus() {
+  if (!mechDoc) return;
+  const banner = document.getElementById("pendingApprovalBanner");
+  if (mechDoc.isApproved === null || mechDoc.isApproved === undefined) {
+    banner.style.display = "block";
+  } else {
+    banner.style.display = "none";
+  }
+  if (mechDoc.isApproved === false) {
+    banner.style.background = "#EF444415";
+    banner.style.borderColor = "#EF444440";
+    banner.innerHTML = `<div style="font-weight:700;color:var(--emergency)">❌ Application Rejected</div>
+      <div style="font-size:13px;color:var(--text-muted);margin-top:4px">Aapka application reject ho gaya. Support se contact karein.</div>`;
+  }
+  // Set online toggle state
+  document.getElementById("onlineToggle").checked = mechDoc.isOnline || false;
+  document.getElementById("onlineStatusLabel").textContent =
+    mechDoc.isOnline ? "🟢 Online — requests mil rahe hain" : "⚫ Offline — requests nahi milenge";
+  document.getElementById("mechOnlineDot").style.background =
+    mechDoc.isOnline ? "var(--success-lt)" : "var(--text-dim)";
+}
+
+// ── Listen Pending Requests (real-time) ───────────────────────
+function listenPendingRequests() {
+  if (pendingReqListener) { pendingReqListener(); }
+  pendingReqListener = db.collection("requests")
+    .where("status", "==", "pending")
+    .orderBy("createdAt", "desc")
+    .limit(15)
+    .onSnapshot((snap) => {
+      const reqs = [];
+      snap.forEach(d => reqs.push(d.data()));
+      renderPendingRequests(reqs);
+      document.getElementById("mStatPending").textContent = reqs.length;
+    }, (e) => {
+      console.error("listenPendingRequests:", e);
+    });
+}
+
+function renderPendingRequests(reqs) {
+  const container = document.getElementById("pendingRequestsList");
+  const badge = document.getElementById("newReqBadge");
+
+  if (!reqs.length) {
+    badge.style.display = "none";
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="es-icon">📭</div>
+        <h3>Koi Pending Request Nahi</h3>
+        <p>Online ho jayein aur wait karein</p>
+      </div>`;
+    return;
+  }
+
+  badge.style.display = "inline-block";
+  container.innerHTML = reqs.map(r => `
+    <div class="request-card fade-in">
+      <div class="req-meta">
+        <span class="req-tag">${vehicleEmoji(r.vehicleType)} ${capitalize(r.vehicleType)}</span>
+        <span class="req-tag">🔧 ${capitalize(r.problemType)}</span>
+        <span class="req-distance">🕐 ${timeAgo(r.createdAt)}</span>
+      </div>
+      <div style="font-weight:700;font-size:15px;margin-bottom:4px">${r.userName || "User"}</div>
+      <div class="req-desc">
+        📞 ${r.userPhone || "—"}<br>
+        📍 ${r.address || "Location available"}<br>
+        ${r.description ? `💬 ${r.description}` : ""}
+      </div>
+      ${r.locationLat ? `<a class="map-link" href="https://maps.google.com/?q=${r.locationLat},${r.locationLng}" target="_blank" style="margin-bottom:12px;display:inline-flex">📍 Map Par Dekho</a>` : ""}
+      ${r.photoUrl ? `<img src="${r.photoUrl}" style="width:100%;border-radius:var(--radius);max-height:160px;object-fit:cover;margin-bottom:12px" alt="Vehicle Photo">` : ""}
+      <div class="req-actions">
+        <button class="btn btn-success" style="flex:1" onclick="acceptRequest('${r.requestId}','${r.userId}','${r.userName}','${r.userPhone}')">✅ Accept</button>
+        <a href="tel:${r.userPhone}" class="btn btn-primary btn-sm">📞</a>
+        <a href="https://wa.me/91${r.userPhone}" target="_blank" class="btn btn-whatsapp btn-sm">💬</a>
+      </div>
+    </div>`).join("");
+}
+
+// ── Accept a Request ──────────────────────────────────────────
+async function acceptRequest(requestId, userId, userName, userPhone) {
+  if (!mechDoc?.isApproved) {
+    showToast("Admin approval ka wait karein", "warning"); return;
+  }
+  if (!mechDoc?.isOnline) {
+    showToast("Pehle online ho jayein", "warning"); return;
+  }
+  setLoading(true);
+  try {
+    await db.collection("requests").doc(requestId).update({
+      status: "accepted",
+      assignedMechanicId: mechUser.uid,
+      mechanicName: mechDoc.name,
+      mechanicPhone: mechDoc.phone || "",
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast("Request accept kar li! Customer ko call karein 📞", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Listen My Active Request ──────────────────────────────────
+function listenMyActiveRequest() {
+  if (myActiveReqListener) myActiveReqListener();
+  if (!mechUser) return;
+
+  myActiveReqListener = db.collection("requests")
+    .where("assignedMechanicId", "==", mechUser.uid)
+    .where("status", "in", ["accepted", "ontheway", "started"])
+    .limit(1)
+    .onSnapshot((snap) => {
+      const section = document.getElementById("myActiveRequestSection");
+      if (snap.empty) { section.style.display = "none"; return; }
+      section.style.display = "block";
+      const r = snap.docs[0].data();
+      renderMyActiveRequest(r);
+    });
+}
+
+function renderMyActiveRequest(r) {
+  const card = document.getElementById("myActiveRequestCard");
+  card.innerHTML = `
+    <div class="status-card" style="border-color:var(--primary-lt)">
+      <div style="font-family:var(--font-head);font-size:18px;font-weight:700;margin-bottom:8px">
+        ${vehicleEmoji(r.vehicleType)} ${capitalize(r.vehicleType)} — ${capitalize(r.problemType)}
+      </div>
+      <div style="font-size:14px;margin-bottom:4px">👤 ${r.userName}</div>
+      <div style="font-size:14px;color:var(--text-muted);margin-bottom:12px">📞 ${r.userPhone}</div>
+      ${r.address ? `<div style="font-size:13px;color:var(--text-muted);margin-bottom:8px">📍 ${r.address}</div>` : ""}
+      ${r.locationLat ? `<a class="map-link" href="https://maps.google.com/?q=${r.locationLat},${r.locationLng}" target="_blank" style="margin-bottom:14px;display:inline-flex">📍 Customer Location Dekho</a>` : ""}
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <a href="tel:${r.userPhone}" class="btn btn-success" style="flex:1">📞 Call</a>
+        <a href="https://wa.me/91${r.userPhone}" target="_blank" class="btn btn-whatsapp" style="flex:1">💬 WhatsApp</a>
+      </div>
+      <div class="section-title" style="font-size:14px;margin-bottom:8px">Status Update Karein:</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${r.status !== "ontheway" ? `<button class="btn btn-primary btn-sm" onclick="updateMyStatus('${r.requestId}','ontheway')">🚗 Aa Raha Hoon</button>` : ""}
+        ${r.status !== "started"  ? `<button class="btn btn-primary btn-sm" onclick="updateMyStatus('${r.requestId}','started')">🔧 Kaam Shuru</button>` : ""}
+        <button class="btn btn-success btn-sm" onclick="updateMyStatus('${r.requestId}','completed')">✅ Complete</button>
+      </div>
+    </div>`;
+}
+
+async function updateMyStatus(requestId, status) {
+  setLoading(true);
+  try {
+    const update = { status, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    if (status === "completed") {
+      // Increment mechanic totalJobs
+      await db.collection("mechanics").doc(mechUser.uid).update({
+        totalJobs: firebase.firestore.FieldValue.increment(1)
+      });
     }
+    await db.collection("requests").doc(requestId).update(update);
+    showToast(`Status updated: ${status}`, "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-// ==================== REQUEST MANAGEMENT ====================
-
-/**
- * Load pending requests
- */
-async function loadPendingRequests() {
-    if (!isOnline) {
-        document.getElementById('pendingRequestsList').innerHTML = 
-            '<p style="color: #999; text-align: center; padding: 20px;">Go Online to see pending requests</p>';
-        return;
+// ── Load Stats ────────────────────────────────────────────────
+async function loadMechStats() {
+  if (!mechUser) return;
+  try {
+    const snap = await db.collection("requests")
+      .where("assignedMechanicId", "==", mechUser.uid)
+      .where("status", "==", "completed")
+      .get();
+    const count = snap.size;
+    document.getElementById("mStatCompleted").textContent = count;
+    document.getElementById("totalJobs").textContent = count;
+    // Estimated earning (₹300 per job average)
+    document.getElementById("todayEarning").textContent = (count * 300).toLocaleString("en-IN");
+    if (mechDoc?.rating) {
+      document.getElementById("mechRating").textContent = mechDoc.rating;
     }
+  } catch (e) {
+    console.error("loadMechStats:", e);
+  }
+}
 
-    const result = await firebase.getPendingRequests(mechanicProfile.serviceArea);
-
-    if (result.success && result.data.length > 0) {
-        const requestsList = document.getElementById('pendingRequestsList');
-        requestsList.innerHTML = '';
-        
-        result.data.forEach((request, index) => {
-            const distance = calculateDistance(
-                mechanicProfile.location?.lat || 0,
-                mechanicProfile.location?.lng || 0,
-                request.locationLat,
-                request.locationLng
-            );
-
-            const card = document.createElement('div');
-            card.style.cssText = `
-                padding: 12px;
-                border: 2px solid #DC2626;
-                border-radius: 8px;
-                background: #FEE2E2;
-                cursor: pointer;
-                transition: all 0.2s;
-            `;
-            card.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                    <div>
-                        <strong style="color: #DC2626;">${request.vehicleType}</strong><br>
-                        <small style="color: #666;">${request.problemType}</small>
-                    </div>
-                    <span style="background: #DC2626; color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: bold;">
-                        NEW
-                    </span>
-                </div>
-                <p style="margin: 8px 0; font-size: 13px; color: #333;">${request.description.substring(0, 50)}...</p>
-                <div style="font-size: 12px; color: #666; margin-bottom: 8px;">
-                    📍 ${distance.toFixed(1)} km away
-                </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-                    <button class="btn btn-small btn-primary" onclick="acceptRequest('${request.requestId}')">
-                        ✅ Accept
-                    </button>
-                    <button class="btn btn-small btn-secondary" onclick="viewRequestDetails('${request.requestId}')">
-                        👁️ View
-                    </button>
-                </div>
-            `;
-            requestsList.appendChild(card);
-        });
-
-        document.getElementById('pendingCount').textContent = `(${result.data.length})`;
-    } else {
-        document.getElementById('pendingRequestsList').innerHTML = 
-            '<p style="color: #999; text-align: center; padding: 20px;">No pending requests nearby</p>';
-        document.getElementById('pendingCount').textContent = '(0)';
+// ── Completed Jobs ────────────────────────────────────────────
+async function loadCompletedJobs() {
+  const container = document.getElementById("completedJobsList");
+  container.innerHTML = "Loading...";
+  try {
+    const snap = await db.collection("requests")
+      .where("assignedMechanicId", "==", mechUser.uid)
+      .where("status", "==", "completed")
+      .orderBy("updatedAt", "desc")
+      .limit(20)
+      .get();
+    if (snap.empty) {
+      container.innerHTML = `<div class="empty-state"><div class="es-icon">📋</div><h3>Abhi koi job nahi</h3></div>`;
+      return;
     }
+    let html = "";
+    snap.forEach(d => {
+      const r = d.data();
+      html += `
+        <div class="completed-job-card fade-in">
+          <div class="job-icon">${vehicleEmoji(r.vehicleType)}</div>
+          <div class="job-info">
+            <h4>${capitalize(r.vehicleType)} — ${capitalize(r.problemType)}</h4>
+            <p>${r.userName} • ${formatDate(r.updatedAt)}</p>
+          </div>
+          <div class="job-earning">₹300</div>
+        </div>`;
+    });
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = `<div class="empty-state"><h3>Error: ${e.message}</h3></div>`;
+  }
 }
 
-/**
- * Load active jobs
- */
-async function loadActiveJobs() {
-    const result = await firebase.getMechanicRequests(currentMechanic.uid);
+// ── Populate Profile ─────────────────────────────────────────
+function populateMechProfile() {
+  if (!mechUser || !mechDoc) return;
+  const name = mechDoc.name || mechUser.displayName || "Mechanic";
+  document.getElementById("mechHeaderName").textContent = name;
+  document.getElementById("mechProfileName").textContent  = name;
+  document.getElementById("mechProfileEmail").textContent = mechDoc.email || mechUser.email || "";
+  document.getElementById("mProfPhone").textContent  = mechDoc.phone    || "—";
+  document.getElementById("mProfArea").textContent   = mechDoc.serviceArea || "—";
+  document.getElementById("mProfExp").textContent    = mechDoc.experience  ? mechDoc.experience + " saal" : "—";
+  document.getElementById("mProfSpec").textContent   = mechDoc.vehicleTypes?.join(", ") || "—";
+  document.getElementById("mProfRating").textContent = mechDoc.rating ? `⭐ ${mechDoc.rating}` : "Abhi koi rating nahi";
 
-    if (result.success && result.data.length > 0) {
-        const jobsList = document.getElementById('activeJobsList');
-        jobsList.innerHTML = '';
-        
-        const activeJobs = result.data.filter(j => j.status !== 'Completed' && j.status !== 'Cancelled');
-        
-        activeJobs.forEach((job) => {
-            const statusColors = {
-                'Accepted': '#2563EB',
-                'Mechanic On The Way': '#8B5CF6',
-                'Work Started': '#F59E0B'
-            };
+  const appr = mechDoc.isApproved;
+  const apprEl = document.getElementById("mProfApproval");
+  if (appr === true)  apprEl.innerHTML = `<span class="badge-approved">✅ Approved</span>`;
+  else if (appr === false) apprEl.innerHTML = `<span class="badge-rejected">❌ Rejected</span>`;
+  else apprEl.innerHTML = `<span class="badge-pending">⏳ Pending</span>`;
 
-            const card = document.createElement('div');
-            card.style.cssText = `
-                padding: 12px;
-                border-left: 4px solid ${statusColors[job.status] || '#999'};
-                background: #F3F4F6;
-                border-radius: 8px;
-            `;
-            card.innerHTML = `
-                <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 8px;">
-                    <div>
-                        <strong>${job.vehicleType} - ${job.problemType}</strong><br>
-                        <small style="color: #666;">${job.userName}</small>
-                    </div>
-                    <span style="background: ${statusColors[job.status]}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">
-                        ${job.status}
-                    </span>
-                </div>
-                <p style="margin: 8px 0; font-size: 13px; color: #333;">📍 ${job.address}</p>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
-                    <button class="btn btn-small btn-primary" onclick="window.location.href='tel:${job.userPhone}'">
-                        📞 Call Customer
-                    </button>
-                    <button class="btn btn-small btn-secondary" onclick="updateJobStatus('${job.requestId}')">
-                        ⏭️ Next Status
-                    </button>
-                </div>
-            `;
-            jobsList.appendChild(card);
-        });
-
-        document.getElementById('activeJobCount').textContent = `(${activeJobs.length})`;
-    } else {
-        document.getElementById('activeJobsList').innerHTML = 
-            '<p style="color: #999; text-align: center; padding: 20px;">No active jobs</p>';
-        document.getElementById('activeJobCount').textContent = '(0)';
-    }
+  const photo = mechDoc.photoURL || mechUser.photoURL;
+  const avatar = document.getElementById("mechProfileAvatar");
+  if (photo) {
+    avatar.innerHTML = `<img src="${photo}" alt="">`;
+  } else {
+    avatar.textContent = name.charAt(0).toUpperCase();
+    avatar.style.fontSize = "40px";
+    avatar.style.background = "linear-gradient(135deg,var(--primary),var(--primary-lt))";
+  }
 }
 
-/**
- * Accept request
- */
-async function acceptRequest(requestId) {
-    showLoading(true);
-
-    const result = await firebase.acceptRequest(
-        requestId,
-        currentMechanic.uid,
-        mechanicProfile.name,
-        mechanicProfile.phone
-    );
-
-    if (result.success) {
-        showToast('Request accepted! Customer will be notified. ✅', 'success');
-        loadPendingRequests();
-        loadActiveJobs();
-    } else {
-        showToast('Failed to accept request: ' + result.error, 'error');
-    }
-
-    showLoading(false);
+async function updateMechProfile() {
+  const area = document.getElementById("mUpdateArea").value.trim();
+  if (!area) { showToast("Area likhein", "warning"); return; }
+  setLoading(true);
+  try {
+    await db.collection("mechanics").doc(mechUser.uid).update({ serviceArea: area });
+    mechDoc.serviceArea = area;
+    populateMechProfile();
+    document.getElementById("mUpdateArea").value = "";
+    showToast("Profile update ho gaya ✅", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-/**
- * View request details
- */
-async function viewRequestDetails(requestId) {
-    const result = await firebase.getRequest(requestId);
-
-    if (result.success) {
-        const req = result.data;
-        const details = `
-🚗 Vehicle: ${req.vehicleType}
-⚙️ Problem: ${req.problemType}
-📍 Location: ${req.address}
-${req.landmark ? '🏢 Landmark: ' + req.landmark + '\n' : ''}
-📝 Details: ${req.description}
-📞 Customer: ${req.userName} (${req.userPhone})
-        `;
-        alert(details);
-    }
+// ── Utilities ─────────────────────────────────────────────────
+function vehicleEmoji(v) {
+  const map = { bike:"🏍️", car:"🚗", tempo:"🚐", loading:"🚚", tractor:"🚜", truck:"🛻", auto:"🛺", other:"🚘" };
+  return map[v] || "🚘";
 }
 
-/**
- * Update job status
- */
-async function updateJobStatus(requestId) {
-    const result = await firebase.getRequest(requestId);
-    
-    if (result.success) {
-        const statuses = ['Accepted', 'Mechanic On The Way', 'Work Started', 'Completed'];
-        const currentStatus = result.data.status;
-        const currentIndex = statuses.indexOf(currentStatus);
-        const nextStatus = statuses[currentIndex + 1];
-
-        if (nextStatus) {
-            showLoading(true);
-            
-            const updateResult = await firebase.updateRequestStatus(
-                requestId,
-                nextStatus
-            );
-
-            if (updateResult.success) {
-                showToast(`Status updated to: ${nextStatus} ✅`, 'success');
-                loadActiveJobs();
-                loadPendingRequests();
-            } else {
-                showToast('Failed to update status', 'error');
-            }
-
-            showLoading(false);
-        } else {
-            showToast('This job is already completed', 'info');
-        }
-    }
+function capitalize(s) {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-// ==================== LOCATION & DISTANCE ====================
-
-/**
- * Update mechanic location
- */
-async function updateLocation() {
-    if (!navigator.geolocation) return;
-
-    navigator.geolocation.getCurrentPosition(
-        async (position) => {
-            await firebase.updateMechanicLocation(
-                currentMechanic.uid,
-                position.coords.latitude,
-                position.coords.longitude
-            );
-        },
-        (error) => {
-            console.log('Location error:', error);
-        }
-    );
+function timeAgo(ts) {
+  if (!ts) return "—";
+  const d = ts.toDate ? ts.toDate() : new Date(ts);
+  const diff = Math.floor((Date.now() - d.getTime()) / 60000);
+  if (diff < 1) return "Abhi";
+  if (diff < 60) return diff + " min pehle";
+  return Math.floor(diff / 60) + " ghante pehle";
 }
-
-/**
- * Calculate distance between two points (Haversine formula)
- */
-function calculateDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371; // Earth's radius in km
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-        Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
-}
-
-// ==================== UTILITY FUNCTIONS ====================
-
-/**
- * Show toast
- */
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `toast show ${type}`;
-    
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 3000);
-}
-
-/**
- * Show loading
- */
-function showLoading(show) {
-    const spinner = document.getElementById('loadingSpinner');
-    if (show) {
-        spinner.classList.add('show');
-    } else {
-        spinner.classList.remove('show');
-    }
-}
-
-console.log('Mechanic app loaded successfully!');
