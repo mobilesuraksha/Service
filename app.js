@@ -1,757 +1,598 @@
-// ==================== GLOBAL STATE ====================
-let currentUser = null;
-let userProfile = null;
-let currentLocation = { lat: null, lng: null };
-let deferredPrompt = null;
 
-// ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', async () => {
-    console.log('App initialized');
-    
-    // Setup event listeners
-    setupEventListeners();
-    
-    // Check auth state
-    firebase.onAuthChange(async (user) => {
-        if (user) {
-            currentUser = user;
-            const profile = await firebase.getUserProfile(user.uid);
-            if (profile.success) {
-                userProfile = profile.data;
-                showPage('home');
-                loadDashboardStats();
-                showToast(`Welcome back, ${userProfile.name}! 👋`, 'success');
-            }
-        } else {
-            currentUser = null;
-            userProfile = null;
-            showPage('home');
-        }
-    });
+// ============================================================
+// app.js — 24x7 Vahan Sahayata — User App Logic
+// ============================================================
 
-    // Handle install prompt
-    window.addEventListener('beforeinstallprompt', (e) => {
-        e.preventDefault();
-        deferredPrompt = e;
-        document.getElementById('installPrompt').classList.add('show');
-    });
+// ── State ────────────────────────────────────────────────────
+let currentUser   = null;
+let userDoc       = null;
+let selectedVehicle  = null;
+let selectedProblem  = null;
+let userLat = null, userLng = null;
+let currentRatingRequestId  = null;
+let currentRatingMechanicId = null;
+let selectedRating = 0;
+let deferredInstallPrompt = null;
+let activeRequestListener = null;
 
-    // Load stats on home page
-    loadDashboardStats();
+// ── PWA Install ───────────────────────────────────────────────
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const banner = document.getElementById("installBanner");
+  if (banner) banner.style.display = "flex";
 });
 
-// ==================== PAGE NAVIGATION ====================
+document.getElementById("installBtn")?.addEventListener("click", async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if (outcome === "accepted") showToast("App install ho gaya! 🎉", "success");
+  deferredInstallPrompt = null;
+  document.getElementById("installBanner").style.display = "none";
+});
 
-/**
- * Show specific page
- */
-function showPage(pageId) {
-    // Check authentication
-    const protectedPages = ['status', 'booking', 'profile'];
-    if (protectedPages.includes(pageId) && !currentUser) {
-        showPage('login');
-        return;
-    }
+document.getElementById("dismissInstall")?.addEventListener("click", () => {
+  document.getElementById("installBanner").style.display = "none";
+});
 
-    // Hide all pages
-    document.querySelectorAll('.page').forEach(page => {
-        page.classList.remove('active');
-    });
-
-    // Show selected page
-    const page = document.getElementById(pageId + 'Page');
-    if (page) {
-        page.classList.add('active');
-        
-        // Load page-specific data
-        if (pageId === 'status') {
-            loadUserRequests();
-        } else if (pageId === 'profile') {
-            loadUserProfile();
-        }
-    }
-
-    // Update bottom nav
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-        if (item.dataset.page === pageId) {
-            item.classList.add('active');
-        }
-    });
-
-    // Scroll to top
-    window.scrollTo(0, 0);
+// ── Service Worker Registration ───────────────────────────────
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js")
+      .then(() => console.log("[SW] Registered"))
+      .catch((e) => console.warn("[SW] Registration failed:", e));
+  });
 }
 
-/**
- * Setup navigation event listeners
- */
-function setupEventListeners() {
-    // Bottom navigation
-    document.querySelectorAll('.nav-item, .action-card').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const pageId = btn.dataset.page || btn.dataset.action;
-            if (pageId) {
-                showPage(pageId);
-            }
-        });
-    });
+// ── Auth State Observer ───────────────────────────────────────
+auth.onAuthStateChanged(async (user) => {
+  if (user) {
+    currentUser = user;
+    await loadUserDoc(user);
+    updateHeaderUI();
+    // If mechanic, redirect to mechanic panel
+    if (userDoc && userDoc.role === "mechanic") {
+      window.location.href = "mechanic.html";
+      return;
+    }
+    // If admin, redirect to admin panel
+    if (ADMIN_EMAILS.includes(user.email)) {
+      window.location.href = "admin.html";
+      return;
+    }
+    loadStatusSection();
+  } else {
+    currentUser = null;
+    userDoc = null;
+    updateHeaderUI();
+  }
+});
 
-    // Back buttons
-    document.querySelectorAll('.back-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const pageId = btn.dataset.page || 'home';
-            showPage(pageId);
-        });
-    });
-
-    // Page navigation links
-    document.querySelectorAll('[data-page]').forEach(link => {
-        if (!link.classList.contains('nav-item') && !link.classList.contains('action-card')) {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                const pageId = link.dataset.page;
-                if (pageId) {
-                    showPage(pageId);
-                }
-            });
-        }
-    });
-
-    // Emergency button
-    document.getElementById('emergencyBtn').addEventListener('click', () => {
-        if (currentUser) {
-            showPage('booking');
-        } else {
-            showPage('login');
-            showToast('Please login first to book emergency service', 'warning');
-        }
-    });
-
-    // Profile button in header
-    document.getElementById('profileBtn').addEventListener('click', () => {
-        if (currentUser) {
-            showPage('profile');
-        } else {
-            showPage('login');
-        }
-    });
-
-    // Logout button
-    document.getElementById('logoutBtn').addEventListener('click', async () => {
-        const result = await firebase.logoutUser();
-        if (result.success) {
-            showToast('Logged out successfully', 'success');
-            currentUser = null;
-            userProfile = null;
-            showPage('home');
-        } else {
-            showToast('Logout failed: ' + result.error, 'error');
-        }
-    });
-
-    // Install button
-    document.getElementById('installBtn').addEventListener('click', async () => {
-        if (deferredPrompt) {
-            deferredPrompt.prompt();
-            const choiceResult = await deferredPrompt.userChoice;
-            if (choiceResult.outcome === 'accepted') {
-                showToast('App installing... 🚀', 'success');
-            }
-            deferredPrompt = null;
-            document.getElementById('installPrompt').classList.remove('show');
-        }
-    });
-
-    document.getElementById('dismissBtn').addEventListener('click', () => {
-        document.getElementById('installPrompt').classList.remove('show');
-    });
-
-    // ==================== LOGIN FORM ====================
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLoading(true);
-
-        const email = document.getElementById('loginEmail').value;
-        const password = document.getElementById('loginPassword').value;
-
-        const result = await firebase.loginUser(email, password);
-        
-        if (result.success) {
-            showToast('Login successful! 🎉', 'success');
-            showPage('home');
-            document.getElementById('loginForm').reset();
-        } else {
-            showToast('Login failed: ' + result.error, 'error');
-        }
-
-        showLoading(false);
-    });
-
-    // Google Login
-    document.getElementById('googleLoginBtn').addEventListener('click', async () => {
-        showLoading(true);
-        const result = await firebase.googleAuth('user');
-        
-        if (result.success) {
-            showToast('Login successful! 🎉', 'success');
-            showPage('home');
-        } else {
-            showToast('Login failed: ' + result.error, 'error');
-        }
-        
-        showLoading(false);
-    });
-
-    // ==================== REGISTER FORM ====================
-    document.getElementById('registerForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLoading(true);
-
-        const name = document.getElementById('regName').value;
-        const email = document.getElementById('regEmail').value;
-        const phone = document.getElementById('regPhone').value;
-        const password = document.getElementById('regPassword').value;
-
-        const result = await firebase.registerUser(email, password, name, phone);
-        
-        if (result.success) {
-            showToast('Registration successful! 🎉', 'success');
-            setTimeout(() => {
-                showPage('login');
-                document.getElementById('registerForm').reset();
-            }, 1000);
-        } else {
-            showToast('Registration failed: ' + result.error, 'error');
-        }
-
-        showLoading(false);
-    });
-
-    // Google Register
-    document.getElementById('googleRegisterBtn').addEventListener('click', async () => {
-        showLoading(true);
-        const result = await firebase.googleAuth('user');
-        
-        if (result.success) {
-            showToast('Registration successful! 🎉', 'success');
-            showPage('home');
-        } else {
-            showToast('Registration failed: ' + result.error, 'error');
-        }
-        
-        showLoading(false);
-    });
-
-    // ==================== BOOKING FORM ====================
-    document.getElementById('bookingForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLoading(true);
-
-        if (!currentLocation.lat || !currentLocation.lng) {
-            showToast('Please enable location before submitting', 'error');
-            showLoading(false);
-            return;
-        }
-
-        const vehicleType = document.querySelector('input[name="vehicleType"]:checked').value;
-        const problemType = document.querySelector('input[name="problemType"]:checked').value;
-        const description = document.getElementById('description').value;
-        const address = document.getElementById('address').value;
-        const landmark = document.getElementById('landmark').value;
-        const phone = document.getElementById('phoneNumber').value;
-        const photoFile = document.getElementById('vehiclePhoto').files[0];
-
-        let photoUrl = "";
-        if (photoFile) {
-            const uploadResult = await firebase.uploadVehiclePhoto(
-                photoFile,
-                currentUser.uid,
-                `${Date.now()}`
-            );
-            if (uploadResult.success) {
-                photoUrl = uploadResult.url;
-            }
-        }
-
-        const requestData = {
-            userId: currentUser.uid,
-            userName: userProfile.name,
-            userPhone: phone,
-            vehicleType: vehicleType,
-            problemType: problemType,
-            description: description,
-            photoUrl: photoUrl,
-            locationLat: currentLocation.lat,
-            locationLng: currentLocation.lng,
-            address: address,
-            landmark: landmark
-        };
-
-        const result = await firebase.submitEmergencyRequest(requestData);
-
-        if (result.success) {
-            showToast('Request submitted successfully! 🚗', 'success');
-            document.getElementById('bookingForm').reset();
-            document.getElementById('locationDisplay').style.display = 'none';
-            document.getElementById('photoPreview').style.display = 'none';
-            setTimeout(() => {
-                showPage('status');
-            }, 1500);
-        } else {
-            showToast('Failed to submit request: ' + result.error, 'error');
-        }
-
-        showLoading(false);
-    });
-
-    // Get Location Button
-    document.getElementById('getLocationBtn').addEventListener('click', () => {
-        if (navigator.geolocation) {
-            showLoading(true);
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    currentLocation.lat = position.coords.latitude;
-                    currentLocation.lng = position.coords.longitude;
-                    
-                    document.getElementById('locationDisplay').style.display = 'block';
-                    document.getElementById('locationText').textContent = 
-                        `📍 ${currentLocation.lat.toFixed(4)}, ${currentLocation.lng.toFixed(4)}`;
-                    
-                    showToast('Location captured! 📍', 'success');
-                    showLoading(false);
-                },
-                (error) => {
-                    showToast('Failed to get location: ' + error.message, 'error');
-                    showLoading(false);
-                }
-            );
-        } else {
-            showToast('Geolocation not supported', 'error');
-        }
-    });
-
-    // Photo Preview
-    document.getElementById('vehiclePhoto').addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                document.getElementById('previewImage').src = event.target.result;
-                document.getElementById('photoPreview').style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        }
-    });
-
-    // ==================== MECHANIC LOGIN ====================
-    document.getElementById('mechanicLoginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLoading(true);
-
-        const email = document.getElementById('mechLoginEmail').value;
-        const password = document.getElementById('mechLoginPassword').value;
-
-        const result = await firebase.loginUser(email, password);
-        
-        if (result.success) {
-            const mechProfile = await firebase.getMechanicProfile(result.uid);
-            if (mechProfile.success) {
-                if (!mechProfile.data.isApproved) {
-                    showToast('Your profile is pending approval', 'warning');
-                    showLoading(false);
-                    return;
-                }
-                window.location.href = 'mechanic.html';
-            } else {
-                showToast('Mechanic profile not found', 'error');
-            }
-        } else {
-            showToast('Login failed: ' + result.error, 'error');
-        }
-
-        showLoading(false);
-    });
-
-    // Mechanic Google Login
-    document.getElementById('mechanicGoogleLoginBtn').addEventListener('click', async () => {
-        showLoading(true);
-        const result = await firebase.googleAuth('mechanic');
-        
-        if (result.success) {
-            const mechProfile = await firebase.getMechanicProfile(result.uid);
-            if (mechProfile.success) {
-                if (!mechProfile.data.isApproved) {
-                    showToast('Your profile is pending approval', 'warning');
-                    showLoading(false);
-                    return;
-                }
-                window.location.href = 'mechanic.html';
-            }
-        } else {
-            showToast('Login failed: ' + result.error, 'error');
-        }
-        
-        showLoading(false);
-    });
-
-    // ==================== MECHANIC REGISTER ====================
-    document.getElementById('mechanicRegisterForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLoading(true);
-
-        const name = document.getElementById('mechName').value;
-        const email = document.getElementById('mechEmail').value;
-        const phone = document.getElementById('mechPhone').value;
-        const experience = document.getElementById('mechExperience').value;
-        const serviceArea = document.getElementById('mechServiceArea').value;
-        const password = document.getElementById('mechPassword').value;
-        
-        const vehicleTypes = Array.from(document.querySelectorAll('input[name="vehicleTypes"]:checked'))
-            .map(input => input.value);
-
-        if (vehicleTypes.length === 0) {
-            showToast('Please select at least one vehicle type', 'warning');
-            showLoading(false);
-            return;
-        }
-
-        const result = await firebase.registerMechanic(
-            email,
-            password,
-            name,
-            phone,
-            experience,
-            serviceArea,
-            vehicleTypes
-        );
-        
-        if (result.success) {
-            showToast('Registration successful! Admin approval pending. 🔄', 'success');
-            setTimeout(() => {
-                showPage('mechanic-login');
-                document.getElementById('mechanicRegisterForm').reset();
-            }, 1500);
-        } else {
-            showToast('Registration failed: ' + result.error, 'error');
-        }
-
-        showLoading(false);
-    });
-
-    // Mechanic Google Register
-    document.getElementById('mechanicGoogleRegisterBtn').addEventListener('click', async () => {
-        showLoading(true);
-        // Show a form to collect additional mechanic details
-        showToast('Complete your mechanic profile after login', 'info');
-        showLoading(false);
-    });
-
-    // ==================== ADMIN LOGIN ====================
-    document.getElementById('adminLoginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        showLoading(true);
-
-        const email = document.getElementById('adminEmail').value;
-        const password = document.getElementById('adminPassword').value;
-
-        const result = await firebase.adminLogin(email, password);
-        
-        if (result.success) {
-            showToast('Admin login successful! 🔐', 'success');
-            setTimeout(() => {
-                window.location.href = 'admin.html';
-            }, 500);
-        } else {
-            showToast('Admin login failed: ' + result.error, 'error');
-        }
-
-        showLoading(false);
-    });
-
-    // ==================== SUPPORT BUTTONS ====================
-    document.getElementById('whatsappBtn').addEventListener('click', () => {
-        const phone = "+919876543210";
-        const message = "Hi! I need help with vehicle repair service.";
-        const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-        window.open(url, '_blank');
-    });
-
-    document.getElementById('whatsappSupportBtn').addEventListener('click', () => {
-        const phone = "+919876543210";
-        const message = "Hi! I need support with my request.";
-        const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
-        window.open(url, '_blank');
-    });
-
-    document.getElementById('callSupportBtn').addEventListener('click', () => {
-        window.location.href = 'tel:+919876543210';
-    });
-
-    document.getElementById('emailSupportBtn').addEventListener('click', () => {
-        window.location.href = 'mailto:support@vahanshayata.com';
-    });
-
-    // FAQ Toggle
-    document.querySelectorAll('.faq-question').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const item = btn.parentElement;
-            const answer = item.querySelector('.faq-answer');
-            
-            // Close other FAQs
-            document.querySelectorAll('.faq-item').forEach(faqItem => {
-                if (faqItem !== item) {
-                    faqItem.classList.remove('active');
-                    faqItem.querySelector('.faq-answer').style.display = 'none';
-                }
-            });
-            
-            // Toggle current
-            item.classList.toggle('active');
-            answer.style.display = answer.style.display === 'none' ? 'block' : 'none';
-        });
-    });
-}
-
-// ==================== DATA LOADING ====================
-
-/**
- * Load user requests
- */
-async function loadUserRequests() {
-    if (!currentUser) return;
-
-    const result = await firebase.getUserRequests(currentUser.uid);
-    const requestsList = document.getElementById('requestsList');
-    const noRequestsMsg = document.getElementById('noRequestsMsg');
-
-    requestsList.innerHTML = '';
-
-    if (result.success && result.data.length > 0) {
-        noRequestsMsg.style.display = 'none';
-        
-        result.data.forEach(request => {
-            const statusColor = getStatusColor(request.status);
-            const requestCard = document.createElement('div');
-            requestCard.className = 'request-card';
-            requestCard.innerHTML = `
-                <div class="request-header">
-                    <h3 class="request-title">${request.vehicleType} - ${request.problemType}</h3>
-                    <span class="request-status ${statusColor}">${request.status}</span>
-                </div>
-                <div class="request-details">
-                    <div class="detail-item">
-                        <span class="detail-label">📍 Location</span>
-                        <span class="detail-value">${request.address}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">⏰ Time</span>
-                        <span class="detail-value">${formatDate(request.createdAt.toDate())}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">🔧 Mechanic</span>
-                        <span class="detail-value">${request.mechanicName || 'Awaiting...'}</span>
-                    </div>
-                    <div class="detail-item">
-                        <span class="detail-label">📞 Mechanic</span>
-                        <span class="detail-value">${request.mechanicPhone || '-'}</span>
-                    </div>
-                </div>
-                <p style="color: #666; font-size: 14px; margin-bottom: 12px;">${request.description}</p>
-                <div class="request-actions">
-                    ${request.mechanicPhone ? `
-                        <button class="btn btn-small btn-primary" onclick="window.location.href='tel:${request.mechanicPhone}'">
-                            📞 Call Mechanic
-                        </button>
-                    ` : '<button class="btn btn-small btn-secondary" disabled>No Mechanic Yet</button>'}
-                    ${request.status === 'Completed' ? `
-                        <button class="btn btn-small btn-secondary" onclick="showReviewForm('${request.requestId}', '${request.assignedMechanicId}')">
-                            ⭐ Rate & Review
-                        </button>
-                    ` : `
-                        <button class="btn btn-small btn-secondary" onclick="updateRequestLocation('${request.requestId}')">
-                            📍 Share Location
-                        </button>
-                    `}
-                </div>
-            `;
-            requestsList.appendChild(requestCard);
-        });
+/** Fetch or create user Firestore document */
+async function loadUserDoc(user) {
+  try {
+    const ref = db.collection("users").doc(user.uid);
+    const snap = await ref.get();
+    if (snap.exists) {
+      userDoc = snap.data();
     } else {
-        requestsList.innerHTML = '';
-        noRequestsMsg.style.display = 'block';
+      // New user — create doc
+      const newDoc = {
+        uid: user.uid,
+        name: user.displayName || "",
+        email: user.email || "",
+        phone: user.phoneNumber || "",
+        photoURL: user.photoURL || "",
+        role: "user",
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      await ref.set(newDoc);
+      userDoc = newDoc;
     }
+  } catch (e) {
+    console.error("loadUserDoc error:", e);
+  }
 }
 
-/**
- * Load user profile
- */
-async function loadUserProfile() {
-    if (!currentUser) return;
-
-    const profile = await firebase.getUserProfile(currentUser.uid);
-    
-    if (profile.success) {
-        userProfile = profile.data;
-        
-        document.getElementById('profileName').textContent = userProfile.name;
-        document.getElementById('profileEmail').textContent = userProfile.email;
-        document.getElementById('profilePhone').textContent = userProfile.phone || '-';
-        document.getElementById('profileEmailInfo').textContent = userProfile.email;
-        document.getElementById('profileCreatedAt').textContent = formatDate(userProfile.createdAt.toDate());
-
-        // Load stats
-        const requests = await firebase.getUserRequests(currentUser.uid);
-        if (requests.success) {
-            const total = requests.data.length;
-            const completed = requests.data.filter(r => r.status === 'Completed').length;
-            
-            document.getElementById('totalRequests').textContent = total;
-            document.getElementById('completedRequests').textContent = completed;
-            
-            // Calculate average rating
-            let avgRating = 0;
-            if (requests.data.length > 0) {
-                const ratings = requests.data
-                    .filter(r => r.rating)
-                    .map(r => r.rating);
-                if (ratings.length > 0) {
-                    avgRating = (ratings.reduce((a, b) => a + b, 0) / ratings.length).toFixed(1);
-                }
-            }
-            document.getElementById('avgRating').textContent = avgRating || '0';
-        }
+/** Update header avatar and name label */
+function updateHeaderUI() {
+  const label = document.getElementById("userNameLabel");
+  const icon  = document.getElementById("headerAvatarIcon");
+  if (currentUser) {
+    const name = (userDoc?.name || currentUser.displayName || "User").split(" ")[0];
+    if (label) { label.textContent = name; label.style.display = "block"; }
+    if (icon && currentUser.photoURL) {
+      document.getElementById("headerAvatar").innerHTML = `<img src="${currentUser.photoURL}" alt="">`;
+    } else if (icon) {
+      icon.textContent = "👤";
     }
+    populateProfile();
+  } else {
+    if (label) label.style.display = "none";
+    if (icon) icon.textContent = "👤";
+  }
 }
 
-/**
- * Load dashboard stats
- */
-async function loadDashboardStats() {
-    // Note: In a real app, you'd fetch from Firestore aggregates
-    // For now, just show placeholder stats
-    const userCount = Math.floor(Math.random() * 1000) + 500;
-    const mechanicCount = Math.floor(Math.random() * 100) + 50;
-    
-    document.getElementById('statsUsers').textContent = userCount;
-    document.getElementById('statsMechanics').textContent = mechanicCount;
+// ── Section Navigation ────────────────────────────────────────
+function showSection(name) {
+  // Check auth for protected sections
+  if (!currentUser && ["booking", "status", "profile"].includes(name)) {
+    showToast("Pehle login karein", "warning");
+    showSection("auth");
+    return;
+  }
+  document.querySelectorAll(".app-section").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+  const sec = document.getElementById(`section-${name}`);
+  const nav = document.getElementById(`nav-${name}`);
+  if (sec) sec.classList.add("active");
+  if (nav) nav.classList.add("active");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (name === "status") loadStatusSection();
+  if (name === "profile") populateProfile();
 }
 
-// ==================== UTILITY FUNCTIONS ====================
-
-/**
- * Show toast notification
- */
-function showToast(message, type = 'info') {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `toast show ${type}`;
-    
-    setTimeout(() => {
-        toast.classList.remove('show');
-    }, 3000);
+/** Called when emergency button is tapped */
+function handleEmergencyClick() {
+  if (!currentUser) {
+    showToast("Login karein phir booking karein", "warning");
+    showSection("auth");
+    return;
+  }
+  showSection("booking");
 }
 
-/**
- * Show loading spinner
- */
-function showLoading(show) {
-    const spinner = document.getElementById('loadingSpinner');
-    if (show) {
-        spinner.classList.add('show');
-    } else {
-        spinner.classList.remove('show');
-    }
+/** Pre-select a problem type from service cards on home */
+function startBooking(problem) {
+  if (!currentUser) {
+    showToast("Pehle login karein", "warning");
+    showSection("auth");
+    return;
+  }
+  showSection("booking");
+  // Pre-select the chip
+  setTimeout(() => {
+    const chip = document.querySelector(`[data-p="${problem}"]`);
+    if (chip) { document.querySelectorAll(".chip").forEach(c => c.classList.remove("selected")); chip.classList.add("selected"); selectedProblem = problem; }
+  }, 100);
 }
 
-/**
- * Get status color class
- */
-function getStatusColor(status) {
-    const colors = {
-        'Pending': 'status-pending',
-        'Accepted': 'status-accepted',
-        'Mechanic On The Way': 'status-on-way',
-        'Work Started': 'status-started',
-        'Completed': 'status-completed',
-        'Cancelled': 'status-cancelled'
+// ── Auth ──────────────────────────────────────────────────────
+function switchAuthTab(tab) {
+  const isLogin = (tab === "login");
+  document.getElementById("loginForm").style.display    = isLogin ? "" : "none";
+  document.getElementById("registerForm").style.display = isLogin ? "none" : "";
+  document.getElementById("tabLogin").classList.toggle("active", isLogin);
+  document.getElementById("tabReg").classList.toggle("active", !isLogin);
+}
+
+async function signInWithGoogle() {
+  setLoading(true);
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await auth.signInWithPopup(provider);
+    showToast("Login successful! 🎉", "success");
+    showSection("home");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function emailLogin() {
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass  = document.getElementById("loginPassword").value;
+  if (!email || !pass) { showToast("Email aur password daalein", "warning"); return; }
+  setLoading(true);
+  try {
+    await auth.signInWithEmailAndPassword(email, pass);
+    showToast("Login successful! 🎉", "success");
+    showSection("home");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function emailRegister() {
+  const name  = document.getElementById("regName").value.trim();
+  const phone = document.getElementById("regPhone").value.trim();
+  const email = document.getElementById("regEmail").value.trim();
+  const pass  = document.getElementById("regPassword").value;
+  if (!name || !email || !pass) { showToast("Saari fields bharein", "warning"); return; }
+  if (pass.length < 6) { showToast("Password kam se kam 6 characters ka ho", "warning"); return; }
+  setLoading(true);
+  try {
+    const cred = await auth.createUserWithEmailAndPassword(email, pass);
+    await cred.user.updateProfile({ displayName: name });
+    // Save to Firestore
+    await db.collection("users").doc(cred.user.uid).set({
+      uid: cred.user.uid, name, email, phone,
+      role: "user",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    showToast("Registration successful! 🎉", "success");
+    showSection("home");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+async function signOutUser() {
+  if (!confirm("Logout karna chahte hain?")) return;
+  await auth.signOut();
+  currentUser = null; userDoc = null;
+  showToast("Logout ho gaye", "info");
+  showSection("home");
+}
+
+// ── Booking ───────────────────────────────────────────────────
+function selectVehicle(el) {
+  document.querySelectorAll(".vehicle-card").forEach(c => c.classList.remove("selected"));
+  el.classList.add("selected");
+  selectedVehicle = el.dataset.v;
+}
+
+function selectProblem(el) {
+  document.querySelectorAll(".chip").forEach(c => c.classList.remove("selected"));
+  el.classList.add("selected");
+  selectedProblem = el.dataset.p;
+}
+
+async function getLocation() {
+  const card = document.getElementById("locationCard");
+  document.getElementById("locationText").textContent = "📡 Location detect ho raha hai...";
+  try {
+    const pos = await getCurrentLocation();
+    userLat = pos.coords.latitude;
+    userLng = pos.coords.longitude;
+    document.getElementById("locationText").textContent = "📍 Location Mili!";
+    document.getElementById("locationCoords").textContent = `Lat: ${userLat.toFixed(4)}, Lng: ${userLng.toFixed(4)}`;
+    card.style.borderColor = "var(--teal)";
+    showToast("Location detect ho gayi ✅", "success");
+  } catch (e) {
+    document.getElementById("locationText").textContent = "❌ Location Nahi Mili";
+    document.getElementById("locationCoords").textContent = "Permission den ya address manually bharein";
+    showToast("Location permission den", "warning");
+  }
+}
+
+function previewPhoto(input) {
+  const prev = document.getElementById("photoPreview");
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      prev.src = e.target.result;
+      prev.style.display = "block";
     };
-    return colors[status] || 'status-pending';
+    reader.readAsDataURL(input.files[0]);
+  }
 }
 
-/**
- * Format date
- */
-function formatDate(date) {
-    if (!date) return '-';
-    return new Intl.DateTimeFormat('en-IN', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    }).format(date);
-}
+async function submitRequest() {
+  if (!currentUser) { showToast("Pehle login karein", "warning"); showSection("auth"); return; }
+  if (!selectedVehicle) { showToast("Vehicle type chunein", "warning"); return; }
+  if (!selectedProblem) { showToast("Problem type chunein", "warning"); return; }
 
-/**
- * Show review form (placeholder)
- */
-function showReviewForm(requestId, mechanicId) {
-    const rating = prompt('Rate the service (1-5):');
-    if (rating && rating >= 1 && rating <= 5) {
-        const review = prompt('Write your review:');
-        if (review) {
-            submitReviewForm(requestId, mechanicId, rating, review);
-        }
-    }
-}
+  const phone   = document.getElementById("bookingPhone").value.trim() || userDoc?.phone || "";
+  const address = document.getElementById("bookingAddress").value.trim();
+  const desc    = document.getElementById("bookingDesc").value.trim();
 
-/**
- * Submit review
- */
-async function submitReviewForm(requestId, mechanicId, rating, review) {
-    if (!currentUser) return;
-    
-    showLoading(true);
-    const result = await firebase.submitReview(
-        currentUser.uid,
-        mechanicId,
-        requestId,
-        rating,
-        review
-    );
-    
-    if (result.success) {
-        showToast('Thank you for your review! ⭐', 'success');
-        loadUserRequests();
-    } else {
-        showToast('Failed to submit review: ' + result.error, 'error');
-    }
-    
-    showLoading(false);
-}
+  if (!phone) { showToast("Phone number daalein", "warning"); return; }
+  if (!userLat && !address) { showToast("Location ya address daalein", "warning"); return; }
 
-/**
- * Update request location
- */
-async function updateRequestLocation(requestId) {
-    if (!navigator.geolocation) {
-        showToast('Geolocation not supported', 'error');
-        return;
+  setLoading(true);
+  try {
+    let photoUrl = "";
+    const photoFile = document.getElementById("vehiclePhoto").files[0];
+    if (photoFile) {
+      const storageRef = storage.ref(`vehicle-photos/${currentUser.uid}/${Date.now()}_${photoFile.name}`);
+      const snap = await storageRef.put(photoFile);
+      photoUrl = await snap.ref.getDownloadURL();
     }
 
-    showLoading(true);
-    navigator.geolocation.getCurrentPosition(
-        async (position) => {
-            // Share location with mechanic (in real app)
-            showToast('Location shared with mechanic! 📍', 'success');
-            showLoading(false);
-        },
-        (error) => {
-            showToast('Failed to get location: ' + error.message, 'error');
-            showLoading(false);
-        }
-    );
+    const requestId = generateRequestId();
+    await db.collection("requests").doc(requestId).set({
+      requestId,
+      userId:   currentUser.uid,
+      userName: userDoc?.name || currentUser.displayName || "",
+      userPhone: phone,
+      vehicleType: selectedVehicle,
+      problemType: selectedProblem,
+      description: desc,
+      photoUrl,
+      locationLat: userLat || null,
+      locationLng: userLng || null,
+      address,
+      status: "pending",
+      assignedMechanicId: "",
+      mechanicName: "",
+      mechanicPhone: "",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    showToast("Request bhej di gayi! Mistri jald aaega 🚗", "success");
+    // Reset form
+    selectedVehicle = null; selectedProblem = null;
+    document.querySelectorAll(".vehicle-card,.chip").forEach(c => c.classList.remove("selected"));
+    document.getElementById("bookingDesc").value = "";
+    document.getElementById("bookingAddress").value = "";
+    document.getElementById("bookingPhone").value = "";
+    document.getElementById("photoPreview").style.display = "none";
+    document.getElementById("vehiclePhoto").value = "";
+    userLat = null; userLng = null;
+    document.getElementById("locationText").textContent = "Location Detect Karein";
+    document.getElementById("locationCoords").textContent = "GPS se current location lene ke liye click karein";
+
+    showSection("status");
+  } catch (e) {
+    showToast("Error: " + e.message, "error");
+  } finally {
+    setLoading(false);
+  }
 }
 
-console.log('App loaded successfully!');
+// ── Status Section ────────────────────────────────────────────
+function loadStatusSection() {
+  if (!currentUser) return;
+  const activeArea = document.getElementById("activeRequestArea");
+  const histArea   = document.getElementById("requestHistoryArea");
+  if (!activeArea || !histArea) return;
+
+  activeArea.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-muted)">Loading...</div>`;
+  histArea.innerHTML = "";
+
+  // Detach old listener
+  if (activeRequestListener) { activeRequestListener(); activeRequestListener = null; }
+
+  // Listen for all user requests
+  activeRequestListener = db.collection("requests")
+    .where("userId", "==", currentUser.uid)
+    .orderBy("createdAt", "desc")
+    .limit(20)
+    .onSnapshot((snap) => {
+      const requests = [];
+      snap.forEach(d => requests.push(d.data()));
+      renderStatusCards(requests);
+    }, (e) => {
+      activeArea.innerHTML = `<div class="empty-state"><div class="es-icon">❌</div><h3>Error</h3><p>${e.message}</p></div>`;
+    });
+}
+
+function renderStatusCards(requests) {
+  const activeArea = document.getElementById("activeRequestArea");
+  const histArea   = document.getElementById("requestHistoryArea");
+  if (!activeArea || !histArea) return;
+
+  const active = requests.filter(r => !["completed","cancelled"].includes(r.status));
+  const history = requests.filter(r => ["completed","cancelled"].includes(r.status));
+
+  // Active requests
+  if (active.length === 0) {
+    activeArea.innerHTML = `<div class="empty-state"><div class="es-icon">✅</div><h3>Koi Active Request Nahi</h3><p>Emergency booking karein, mistri turant aaega</p><button class="btn btn-danger" onclick="showSection('booking')" style="margin-top:12px">🆘 New Booking</button></div>`;
+    document.getElementById("statusDot").style.display = "none";
+  } else {
+    document.getElementById("statusDot").style.display = "block";
+    activeArea.innerHTML = active.map(r => buildActiveCard(r)).join("");
+  }
+
+  // History
+  if (history.length > 0) {
+    histArea.innerHTML = `<div class="section-title" style="margin-bottom:8px">📋 Past Requests</div>` + history.map(r => buildHistCard(r)).join("");
+  }
+}
+
+function buildActiveCard(r) {
+  const statuses = [
+    { key: "pending",   label: "Request Bheja",       icon: "📤" },
+    { key: "accepted",  label: "Mechanic Ne Accept Kiya", icon: "✅" },
+    { key: "ontheway",  label: "Mistri Aa Raha Hai",  icon: "🚗" },
+    { key: "started",   label: "Kaam Shuru",           icon: "🔧" },
+    { key: "completed", label: "Kaam Pura",            icon: "🎉" },
+  ];
+  const si = statuses.findIndex(s => s.key === r.status);
+  const timelineHtml = statuses.map((s, i) => `
+    <div class="timeline-item ${i < si ? 'done' : (i === si ? 'active' : '')}">
+      <div class="tl-dot">${s.icon}</div>
+      <div class="tl-content">
+        <div class="tl-title">${s.label}</div>
+        ${i === si ? `<div class="tl-sub">Current status</div>` : ""}
+      </div>
+    </div>`).join("");
+
+  const mechHtml = r.mechanicName ? `
+    <div class="mechanic-card">
+      <div class="mech-avatar">🔧</div>
+      <div class="mech-info">
+        <h4>${r.mechanicName}</h4>
+        <div class="mech-meta">Aapka Mechanic • ${r.mechanicPhone || "—"}</div>
+      </div>
+      <div class="mech-actions">
+        ${r.mechanicPhone ? `<a href="tel:${r.mechanicPhone}" class="btn btn-success btn-sm">📞</a>` : ""}
+        ${r.mechanicPhone ? `<a href="https://wa.me/91${r.mechanicPhone}" target="_blank" class="btn btn-whatsapp btn-sm">💬</a>` : ""}
+      </div>
+    </div>` : "";
+
+  const mapLink = r.locationLat ? `<a class="map-link" href="https://maps.google.com/?q=${r.locationLat},${r.locationLng}" target="_blank">📍 Map Par Dekho</a>` : "";
+
+  return `
+    <div class="status-card fade-in">
+      <div class="status-header">
+        <div>
+          <div class="request-id">${r.requestId}</div>
+          <div style="font-family:var(--font-head);font-size:18px;font-weight:700;margin-top:4px">${vehicleEmoji(r.vehicleType)} ${capitalize(r.vehicleType)} — ${capitalize(r.problemType)}</div>
+          <div style="font-size:12px;color:var(--text-muted)">${formatDate(r.createdAt)}</div>
+        </div>
+        ${getStatusBadge(r.status)}
+      </div>
+      ${mechHtml}
+      <div class="timeline">${timelineHtml}</div>
+      ${mapLink}
+      ${r.status === "completed" ? `<button class="btn btn-primary btn-full" style="margin-top:12px" onclick="openRating('${r.requestId}','${r.assignedMechanicId}','${r.mechanicName}')">⭐ Rate Service</button>` : ""}
+      ${r.status === "pending" ? `<button class="btn btn-outline btn-full btn-sm" style="margin-top:12px" onclick="cancelRequest('${r.requestId}')">❌ Cancel Request</button>` : ""}
+    </div>`;
+}
+
+function buildHistCard(r) {
+  return `
+    <div class="hist-card">
+      <div class="hist-header">
+        <div>
+          <div class="hist-vehicle">${vehicleEmoji(r.vehicleType)} ${capitalize(r.vehicleType)} — ${capitalize(r.problemType)}</div>
+          <div class="hist-problem">${r.mechanicName ? "Mechanic: " + r.mechanicName : "Mechanic assign nahi hua"}</div>
+          <div class="hist-date">${formatDate(r.createdAt)}</div>
+        </div>
+        ${getStatusBadge(r.status)}
+      </div>
+    </div>`;
+}
+
+async function cancelRequest(requestId) {
+  if (!confirm("Request cancel karna chahte hain?")) return;
+  setLoading(true);
+  try {
+    await db.collection("requests").doc(requestId).update({ status: "cancelled", updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    showToast("Request cancel ho gayi", "info");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Rating ────────────────────────────────────────────────────
+function openRating(requestId, mechanicId, mechanicName) {
+  currentRatingRequestId  = requestId;
+  currentRatingMechanicId = mechanicId;
+  selectedRating = 0;
+  document.getElementById("ratingMechName").textContent = "Mechanic: " + mechanicName;
+  document.querySelectorAll(".star").forEach(s => s.classList.remove("active"));
+  document.getElementById("reviewText").value = "";
+  const m = document.getElementById("ratingModal");
+  m.style.display = "flex";
+}
+
+function closeRating() {
+  document.getElementById("ratingModal").style.display = "none";
+}
+
+function selectStar(n) {
+  selectedRating = n;
+  document.querySelectorAll(".star").forEach((s, i) => s.classList.toggle("active", i < n));
+}
+
+async function submitRating() {
+  if (!selectedRating) { showToast("Rating dein", "warning"); return; }
+  const review = document.getElementById("reviewText").value.trim();
+  setLoading(true);
+  try {
+    await db.collection("reviews").add({
+      userId: currentUser.uid,
+      mechanicId: currentRatingMechanicId,
+      requestId: currentRatingRequestId,
+      rating: selectedRating,
+      review,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    // Update mechanic's average rating
+    const revSnap = await db.collection("reviews").where("mechanicId", "==", currentRatingMechanicId).get();
+    let total = 0; let count = 0;
+    revSnap.forEach(d => { total += d.data().rating; count++; });
+    if (currentRatingMechanicId) {
+      await db.collection("mechanics").doc(currentRatingMechanicId).update({ rating: (total / count).toFixed(1) });
+    }
+    closeRating();
+    showToast("Rating dene ke liye shukriya! ⭐", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Profile ───────────────────────────────────────────────────
+function populateProfile() {
+  if (!currentUser) return;
+  const name  = userDoc?.name || currentUser.displayName || "User";
+  const email = userDoc?.email || currentUser.email || "";
+  const phone = userDoc?.phone || "";
+  const photo = userDoc?.photoURL || currentUser.photoURL || "";
+  const joined = formatDate(userDoc?.createdAt);
+
+  document.getElementById("profileName").textContent  = name;
+  document.getElementById("profileEmail").textContent = email;
+  document.getElementById("profilePhone").textContent = phone || "Add karein";
+  document.getElementById("profileEmailRow").textContent = email;
+  document.getElementById("profileJoined").textContent   = joined;
+
+  const avatarEl = document.getElementById("profileAvatar");
+  if (photo) {
+    avatarEl.innerHTML = `<img src="${photo}" alt="">`;
+  } else {
+    avatarEl.textContent = name.charAt(0).toUpperCase();
+    avatarEl.style.fontSize = "40px";
+    avatarEl.style.background = "linear-gradient(135deg,var(--emergency),var(--accent))";
+  }
+}
+
+async function editPhone() {
+  const phone = prompt("New phone number daalein:");
+  if (!phone) return;
+  setLoading(true);
+  try {
+    await db.collection("users").doc(currentUser.uid).update({ phone });
+    userDoc.phone = phone;
+    populateProfile();
+    showToast("Phone update ho gaya ✅", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Contact / Feedback ────────────────────────────────────────
+async function submitFeedback() {
+  const text = document.getElementById("feedbackText").value.trim();
+  if (!text) { showToast("Feedback likhein", "warning"); return; }
+  setLoading(true);
+  try {
+    await db.collection("feedback").add({
+      userId: currentUser?.uid || "anonymous",
+      userName: userDoc?.name || "Anonymous",
+      text,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    document.getElementById("feedbackText").value = "";
+    showToast("Feedback mil gaya, shukriya! 🙏", "success");
+  } catch (e) {
+    showToast(e.message, "error");
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ── Utility ───────────────────────────────────────────────────
+function vehicleEmoji(v) {
+  const map = { bike:"🏍️", car:"🚗", tempo:"🚐", loading:"🚚", tractor:"🚜", truck:"🛻", auto:"🛺", other:"🚘" };
+  return map[v] || "🚘";
+}
+
+function capitalize(s) {
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// Handle hash-based deep link (e.g. index.html#booking)
+window.addEventListener("load", () => {
+  const hash = window.location.hash.replace("#", "");
+  if (hash && ["booking","status","contact","profile"].includes(hash)) {
+    showSection(hash);
+  }
+});
