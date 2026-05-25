@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mistri Dashboard - 24x7 Vahan Sahayata</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .dashboard {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            padding: 20px;
+        }
+        .dashboard-item {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .online-toggle {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .toggle-switch {
+            width: 60px;
+            height: 34px;
+            background: #ccc;
+            border-radius: 17px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .toggle-switch.active {
+            background: #16A34A;
+        }
+        .toggle-circle {
+            width: 30px;
+            height: 30px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: left 0.3s;
+        }
+        .toggle-switch.active .toggle-circle {
+            left: 28px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <!-- Header -->
+    <header class="header-top">
+        <div class="header-left">
+            <div class="logo-badge">
+                <span class="logo-emoji">🔧</span>
+            </div>
+            <div>
+                <h1 class="app-title" id="mechnicName">Mistri Dashboard</h1>
+                <p class="app-tagline" id="onlineStatus">🔴 Offline</p>
+            </div>
+        </div>
+        <button id="logoutMechBtn" class="icon-btn" title="Logout">
+            <span class="icon">🚪</span>
+        </button>
+    </header>
+
+    <!-- Main Dashboard -->
+    <div class="dashboard">
+        <!-- Online Status Toggle -->
+        <div class="dashboard-item" style="grid-column: 1/-1;">
+            <h3>Your Status</h3>
+            <div class="online-toggle">
+                <div class="toggle-switch" id="onlineToggle">
+                    <div class="toggle-circle"></div>
+                </div>
+                <span id="statusText">Click to go Online</span>
+            </div>
+            <p id="statusMessage" style="font-size: 14px; color: #666;"></p>
+        </div>
+
+        <!-- Pending Requests -->
+        <div class="dashboard-item">
+            <h3>📋 Pending Requests <span id="pendingCount" style="color: #DC2626; font-weight: bold;">(0)</span></h3>
+            <div id="pendingRequestsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
+                <p style="color: #999; text-align: center; padding: 20px;">No pending requests</p>
+            </div>
+        </div>
+
+        <!-- My Active Jobs -->
+        <div class="dashboard-item">
+            <h3>🔧 Active Jobs <span id="activeJobCount" style="color: #2563EB; font-weight: bold;">(0)</span></h3>
+            <div id="activeJobsList" style="display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto;">
+                <p style="color: #999; text-align: center; padding: 20px;">No active jobs</p>
+            </div>
+        </div>
+
+        <!-- Earnings -->
+        <div class="dashboard-item">
+            <h3>💰 Today's Earnings</h3>
+            <div style="font-size: 32px; font-weight: bold; color: #16A34A; margin: 10px 0;">₹0</div>
+            <small style="color: #666;">Completed jobs: <span id="completedToday">0</span></small>
+        </div>
+
+        <!-- Statistics -->
+        <div class="dashboard-item">
+            <h3>📊 Statistics</h3>
+            <div style="font-size: 24px; font-weight: bold; color: #2563EB; margin: 10px 0;">
+                <div>Total Jobs: <span id="totalJobs">0</span></div>
+                <div style="font-size: 18px; margin-top: 5px;">Rating: <span id="mechRating">0</span>⭐</div>
+            </div>
+        </div>
+
+        <!-- Profile -->
+        <div class="dashboard-item">
+            <h3>👤 My Profile</h3>
+            <p><strong>Name:</strong> <span id="mechName">-</span></p>
+            <p><strong>Phone:</strong> <span id="mechPhone">-</span></p>
+            <p><strong>Experience:</strong> <span id="mechExp">0</span> years</p>
+            <p><strong>Area:</strong> <span id="mechArea">-</span></p>
+            <button class="btn btn-small btn-primary" style="margin-top: 10px; width: 100%;" onclick="window.location.href='#edit-profile'">
+                Edit Profile
+            </button>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="firebase.js"></script>
+    <script src="mechanic.js"></script>
+</body>
+</html>
